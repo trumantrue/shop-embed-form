@@ -1,0 +1,233 @@
+// Site monitor: drives a real Chromium through an (optional) Bright Data
+// residential proxy, re-checks the target URL on an interval, and detects
+// "the content on screen changed" via two signals:
+//   1. visible DOM text hash (any change triggers)
+//   2. screenshot pixel diff (must exceed pixelThreshold fraction)
+// A change must persist for `confirmChecks` consecutive checks before an
+// ntfy alert fires (kills one-frame rendering noise). Navigation failures
+// and recoveries alert too.
+//
+// config.json is re-read every cycle, so the URL (and interval/thresholds)
+// are editable at runtime without a restart. Screenshots land in data/.
+//
+// Env (secrets & deployment wiring — everything else lives in config.json):
+//   BRD_CUSTOMER / BRD_ZONE / BRD_PASSWORD  Bright Data credentials (omit all → direct connection)
+//   NTFY_SERVER / NTFY_TOPIC / NTFY_TOKEN   see lib/ntfy.js
+//   LIVE_VIEW_URL   public noVNC URL included in alerts, e.g. http://host:6080/vnc.html
+//   CHROME_PATH     explicit Chromium binary (else Playwright's own resolution)
+//   HEADLESS=1      run headless (local testing without a display)
+//   CONFIG_PATH     alternative config file (default ./config.json)
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { chromium } = require('playwright');
+const { PNG } = require('pngjs');
+const pixelmatch = require('pixelmatch');
+const ntfy = require('./lib/ntfy');
+
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const LIVE_VIEW_URL = process.env.LIVE_VIEW_URL || '';
+const HEADLESS = process.env.HEADLESS === '1';
+
+const DEFAULTS = {
+  label: 'monitor-1',
+  url: 'http://localhost:8080',
+  checkIntervalSeconds: 60,
+  pixelThreshold: 0.02,     // fraction of viewport pixels that must differ
+  confirmChecks: 2,         // consecutive changed checks before alerting
+  blockAssets: false,       // abort images/fonts/media requests to save proxy GB
+  country: null,            // two-letter code for Bright Data geo, e.g. "de"
+  viewport: { width: 1280, height: 900 },
+  navTimeoutMs: 45000,
+};
+
+function loadConfig() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return { ...DEFAULTS, ...raw, viewport: { ...DEFAULTS.viewport, ...(raw.viewport || {}) } };
+  } catch (err) {
+    console.error(`[watcher] cannot read ${CONFIG_PATH} (${err.message}); using defaults`);
+    return { ...DEFAULTS };
+  }
+}
+
+function proxySettings(cfg) {
+  const { BRD_CUSTOMER, BRD_ZONE, BRD_PASSWORD } = process.env;
+  if (!BRD_CUSTOMER || !BRD_ZONE || !BRD_PASSWORD) return null;
+  const session = crypto.randomBytes(4).toString('hex');
+  let username = `brd-customer-${BRD_CUSTOMER}-zone-${BRD_ZONE}`;
+  if (cfg.country) username += `-country-${cfg.country}`;
+  username += `-session-${session}`;
+  return {
+    server: process.env.BRD_PROXY_HOST || 'http://brd.superproxy.io:33335',
+    username,
+    password: BRD_PASSWORD,
+  };
+}
+
+function sha256(s) {
+  return crypto.createHash('sha256').update(s).digest('hex');
+}
+
+function pixelDiffFraction(bufA, bufB) {
+  const a = PNG.sync.read(bufA);
+  const b = PNG.sync.read(bufB);
+  if (a.width !== b.width || a.height !== b.height) return 1; // treat size change as full change
+  const differing = pixelmatch(a.data, b.data, null, a.width, a.height, { threshold: 0.1 });
+  return differing / (a.width * a.height);
+}
+
+function ts() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+async function main() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  let cfg = loadConfig();
+  const proxy = proxySettings(cfg);
+
+  console.log(`[watcher] label=${cfg.label} url=${cfg.url} interval=${cfg.checkIntervalSeconds}s ` +
+    `proxy=${proxy ? `bright-data (country=${cfg.country || 'any'})` : 'DIRECT (no BRD_* env set)'} headless=${HEADLESS}`);
+
+  const browser = await chromium.launch({
+    headless: HEADLESS,
+    executablePath: process.env.CHROME_PATH || undefined,
+    proxy: proxy || undefined,
+    args: ['--no-sandbox', '--disable-dev-shm-usage', `--window-size=${cfg.viewport.width},${cfg.viewport.height}`],
+  });
+  const context = await browser.newContext({ viewport: cfg.viewport, ignoreHTTPSErrors: false });
+  const page = await context.newPage();
+
+  if (proxy) {
+    // brdtest.com is Bright Data's own check endpoint; log the exit geo once
+    // so alerts can be sanity-checked against IP churn.
+    try {
+      const geo = await context.request.get('https://geo.brdtest.com/mygeo.json', { timeout: 15000 });
+      console.log(`[watcher] exit geo: ${(await geo.text()).slice(0, 300)}`);
+    } catch (err) {
+      console.warn(`[watcher] exit-geo check failed: ${err.message}`);
+    }
+  }
+
+  let assetBlockingOn = false;
+  async function syncAssetBlocking() {
+    if (cfg.blockAssets && !assetBlockingOn) {
+      await page.route('**/*', (route) => {
+        const type = route.request().resourceType();
+        if (['image', 'font', 'media'].includes(type)) return route.abort();
+        return route.continue();
+      });
+      assetBlockingOn = true;
+    } else if (!cfg.blockAssets && assetBlockingOn) {
+      await page.unroute('**/*');
+      assetBlockingOn = false;
+    }
+  }
+
+  let baseline = null;          // { shot: Buffer, textHash: string, url: string }
+  let pendingChange = 0;        // consecutive changed checks
+  let lastNavError = false;
+
+  async function alert({ title, message, shot }) {
+    return ntfy.publish({
+      title: `[${cfg.label}] ${title}`,
+      message,
+      clickUrl: LIVE_VIEW_URL || cfg.url,
+      actionLabel: LIVE_VIEW_URL ? 'Open live browser' : 'Open site',
+      attachment: shot,
+      filename: shot ? `${cfg.label}-${ts()}.png` : undefined,
+    });
+  }
+
+  async function check() {
+    const fresh = loadConfig();
+    const urlChanged = fresh.url !== cfg.url;
+    cfg = fresh;
+    await syncAssetBlocking();
+    if (urlChanged) {
+      console.log(`[watcher] url changed in config → ${cfg.url}; resetting baseline`);
+      baseline = null;
+      pendingChange = 0;
+    }
+
+    try {
+      await page.goto(cfg.url, { waitUntil: 'networkidle', timeout: cfg.navTimeoutMs });
+    } catch (err) {
+      console.error(`[watcher] navigation failed: ${err.message}`);
+      if (!lastNavError) {
+        lastNavError = true;
+        await alert({ title: 'Site unreachable', message: `${cfg.url}\n${err.message.split('\n')[0]}` });
+      }
+      return;
+    }
+    if (lastNavError) {
+      lastNavError = false;
+      baseline = null; // page may legitimately differ after an outage; rebaseline
+      await alert({ title: 'Site reachable again', message: cfg.url });
+    }
+
+    await page.waitForTimeout(500); // small settle for late paints
+    const shot = await page.screenshot({ type: 'png' });
+    const text = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+    const textHash = sha256(text);
+
+    if (!baseline) {
+      baseline = { shot, textHash, url: cfg.url };
+      fs.writeFileSync(path.join(DATA_DIR, 'baseline.png'), shot);
+      console.log(`[watcher] baseline captured (${text.length} chars of text)`);
+      return;
+    }
+
+    const pixFrac = pixelDiffFraction(baseline.shot, shot);
+    const textChanged = textHash !== baseline.textHash;
+    const changed = textChanged || pixFrac > cfg.pixelThreshold;
+    console.log(`[watcher] check: pixelDiff=${(pixFrac * 100).toFixed(2)}% textChanged=${textChanged} ` +
+      `pending=${changed ? pendingChange + 1 : 0}/${cfg.confirmChecks}`);
+
+    if (!changed) {
+      pendingChange = 0;
+      return;
+    }
+    pendingChange += 1;
+    if (pendingChange < cfg.confirmChecks) return;
+
+    const stamp = ts();
+    const beforePath = path.join(DATA_DIR, `${stamp}-before.png`);
+    const afterPath = path.join(DATA_DIR, `${stamp}-after.png`);
+    fs.writeFileSync(beforePath, baseline.shot);
+    fs.writeFileSync(afterPath, shot);
+    console.log(`[watcher] CHANGE CONFIRMED — screenshots: ${beforePath} / ${afterPath}`);
+
+    await alert({
+      title: 'Content changed',
+      message: `${cfg.url}\npixel diff ${(pixFrac * 100).toFixed(1)}%, text ${textChanged ? 'changed' : 'unchanged'}. ` +
+        `Tap to open the live browser and take control.`,
+      shot,
+    });
+
+    baseline = { shot, textHash, url: cfg.url };
+    pendingChange = 0;
+  }
+
+  // Startup notice so a freshly deployed instance announces itself.
+  await alert({ title: 'Monitor started', message: `Watching ${cfg.url} every ${cfg.checkIntervalSeconds}s` });
+
+  for (;;) {
+    const started = Date.now();
+    try {
+      await check();
+    } catch (err) {
+      console.error(`[watcher] check crashed: ${err.message}`);
+    }
+    const elapsed = Date.now() - started;
+    const waitMs = Math.max(1000, cfg.checkIntervalSeconds * 1000 - elapsed);
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
+
+main().catch((err) => {
+  console.error('[watcher] fatal:', err);
+  process.exit(1);
+});

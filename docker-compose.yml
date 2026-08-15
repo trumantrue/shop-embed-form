@@ -1,0 +1,40 @@
+services:
+  # Simulated target: "Hello World" that flips to a data-input form at a
+  # random time. Replace with your real site by editing monitor/config.json.
+  test-site:
+    build: ./test-site
+    ports:
+      - "8080:8080"
+    environment:
+      FLIP_MIN_SECONDS: ${FLIP_MIN_SECONDS:-60}
+      FLIP_MAX_SECONDS: ${FLIP_MAX_SECONDS:-600}
+
+  monitor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.monitor
+    ports:
+      - "6080:6080"   # noVNC live view / takeover
+    environment:
+      # Bright Data — leave unset for a direct connection (local testing)
+      BRD_CUSTOMER: ${BRD_CUSTOMER:-}
+      BRD_ZONE: ${BRD_ZONE:-}
+      BRD_PASSWORD: ${BRD_PASSWORD:-}
+      # ntfy
+      NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      # takeover
+      VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
+      LIVE_VIEW_URL: ${LIVE_VIEW_URL:-http://localhost:6080/vnc.html}
+    volumes:
+      # URL/interval/thresholds editable at runtime — the watcher re-reads
+      # this file every cycle, no restart needed.
+      - ./monitor/config.json:/app/config.json
+      - monitor-data:/app/data
+    shm_size: 1gb
+    depends_on:
+      - test-site
+
+volumes:
+  monitor-data:

@@ -1,0 +1,9 @@
+{
+  "label": "test-1",
+  "url": "http://test-site:8080",
+  "checkIntervalSeconds": 20,
+  "pixelThreshold": 0.02,
+  "confirmChecks": 2,
+  "blockAssets": false,
+  "country": null
+}

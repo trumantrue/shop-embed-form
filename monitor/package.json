@@ -1,0 +1,15 @@
+{
+  "name": "site-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Watches a URL through a Bright Data residential proxy from a real browser, alerts via ntfy on content change, exposes the browser for takeover via noVNC.",
+  "main": "watcher.js",
+  "scripts": {
+    "start": "node watcher.js"
+  },
+  "dependencies": {
+    "pixelmatch": "^5.3.0",
+    "playwright": "^1.49.0",
+    "pngjs": "^7.0.0"
+  }
+}
