@@ -1,0 +1,145 @@
+# Operational notes
+
+## 1. MacBook-only smoke test (no Docker, no proxy) — verified
+
+Run natively, headful, direct connection:
+
+```bash
+# terminal 1 — the simulated target
+FLIP_MIN_SECONDS=60 FLIP_MAX_SECONDS=120 node test-site/server.js
+
+# terminal 2 — the watcher
+cd monitor
+npm install
+npx playwright install chromium
+NTFY_TOPIC=<your-unguessable-topic> node watcher.js
+```
+
+`monitor/config.json` must point at `http://localhost:8080` for this
+(see the warning in §2 — that is *not* the right value under Docker).
+macOS has a real display, so Chromium runs headful with no Xvfb and no VNC;
+leave `HEADLESS` unset and leave all `BRD_*` unset for a direct connection.
+
+Useful during a test run:
+
+```bash
+curl -s localhost:8080/status        # state + scheduled flip time
+curl -s localhost:8080/submissions   # proves a takeover actually typed something
+curl -sX POST localhost:8080/reset   # re-arm with a fresh random flip time
+```
+
+`POST /reset` is the way to re-run the test without restarting anything — the
+watcher re-baselines on its own after each confirmed change, so a reset gives
+you a clean hello → form cycle on demand.
+
+## 2. ⚠ `config.json` url differs between native and Docker
+
+| How you run it | Correct `url` |
+|---|---|
+| Natively on the MacBook (§1) | `http://localhost:8080` |
+| `docker compose up` | `http://test-site:8080` |
+
+Inside the monitor container `localhost` is the *container itself*, not the
+host and not the test-site container — compose service DNS is what resolves
+`test-site`. The committed value is currently `http://localhost:8080` for the
+native smoke test, so **change it back before the first compose run on the
+mini**. (To watch something running on the mini's macOS host rather than in a
+sibling container, use `http://host.docker.internal:<port>`.)
+
+## 3. Mac mini phase — browsers on the mini, MacBook as control side
+
+Not yet executed; this is the prep.
+
+### Topology
+
+The mini runs `docker compose up` (OrbStack or Docker Desktop): the monitor
+container holds Chromium + Xvfb + x11vnc + noVNC on port 6080. The MacBook
+does not run a browser at all — it opens the live view over Tailscale and
+edits config. Alerts still come from the mini straight out to ntfy.sh.
+
+### `.env` on the mini
+
+```bash
+NTFY_TOPIC=<unguessable>
+VNC_PASSWORD=<strong; compose refuses to start without it>
+LIVE_VIEW_URL=http://<mini-magicdns-name>:6080/vnc.html
+# BRD_* stay unset until you're pointing at a real site through Bright Data
+```
+
+`LIVE_VIEW_URL` is only ever embedded in the ntfy push — it is resolved on
+**your phone**, so it must be a name the phone can reach. That means the phone
+has to be on the same tailnet, and MagicDNS must be enabled. Use the MagicDNS
+name (e.g. `mini.tailnet-name.ts.net`), not `localhost` and not the LAN IP.
+
+### Binding noVNC to Tailscale only
+
+As shipped, `ports: - "6080:6080"` publishes on **0.0.0.0** — every interface
+the mini has, including its LAN and anything the router forwards. noVNC is
+password-protected but plain HTTP, so on the LAN the password crosses the wire
+in the clear. Pin it to the Tailscale address instead:
+
+```yaml
+    ports:
+      - "${LIVE_VIEW_BIND:-127.0.0.1}:6080:6080"
+```
+
+and set `LIVE_VIEW_BIND=100.x.y.z` (the mini's Tailscale IP — `tailscale ip -4`)
+in `.env`. The 100.x address is stable per device, so this survives reboots;
+it does *not* survive moving the tailnet to a new account, so it belongs in
+`.env` rather than hardcoded in the compose file.
+
+Two caveats to check on the day:
+
+- Docker Desktop and OrbStack both bind host IPs on macOS, but the Tailscale
+  `utun` interface has to exist *before* the container starts, or the bind
+  fails. If compose starts at login before Tailscale is up, the monitor
+  service will fail to publish the port — hence `restart: unless-stopped`
+  below, which lets it retry.
+- Alternative that avoids the bind question entirely: leave 6080 on
+  `127.0.0.1` and put `tailscale serve https / http://127.0.0.1:6080` in front.
+  That gets real HTTPS from Tailscale's certs, so the VNC password stops
+  travelling in cleartext even inside the tunnel, and `LIVE_VIEW_URL` becomes
+  `https://<mini-magicdns-name>/vnc.html` with no port. This is the better
+  end state; the direct 100.x bind is the quicker one.
+
+### Unattended running
+
+The compose file has **no restart policy** — after a mini reboot or an OrbStack
+restart nothing comes back. For an always-on monitor add to both services:
+
+```yaml
+    restart: unless-stopped
+```
+
+Also on the mini:
+
+- Set the container runtime to start at login (OrbStack: Settings → Start at
+  login; Docker Desktop: the equivalent), and make sure the mini actually
+  auto-logs-in, otherwise nothing starts until someone sits at it.
+- Stop it sleeping: System Settings → Energy → *Prevent automatic sleeping when
+  the display is off*. A sleeping mini silently stops monitoring, and because
+  the watcher only alerts on *change*, a dead monitor looks exactly like a
+  quiet site — there is no heartbeat alert. Worth adding one.
+- Apple Silicon: `node:22-bookworm` and Playwright's Chromium both have linux
+  arm64 builds, so the image builds natively — no `platform:` override and no
+  Rosetta emulation needed. Expect the first build to take a while (Chromium
+  plus its apt dependencies).
+
+### Once it's up
+
+1. `curl http://<mini-magicdns>:6080/vnc.html` from the MacBook — proves the
+   tunnel and the bind before involving the phone.
+2. Trigger a change (`curl -sX POST http://<mini-magicdns>:8080/reset` if the
+   test-site service is still in the stack) and check the push arrives with the
+   screenshot **and** that tapping *Open live browser* lands on the noVNC login.
+3. Fill in the form through noVNC, then `curl http://<mini-magicdns>:8080/submissions`
+   to confirm the takeover reached the site — that is the actual end-to-end proof.
+
+## 4. Known gaps worth closing later
+
+- **No heartbeat.** Silence means "no change" *or* "monitor is dead". A daily
+  "still watching" ntfy at low priority would separate the two.
+- **`monitor-data` grows unbounded** — two PNGs per confirmed change, forever,
+  in a Docker volume. Needs a retention sweep before this runs for months.
+- **`config.json` is bind-mounted read-only in practice but not declared `:ro`.**
+  Adding `:ro` would stop a compromised container rewriting the URL it watches.
