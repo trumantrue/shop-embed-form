@@ -1,0 +1,279 @@
+<title>Beating the Glastonbury Queue</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#f2f4ee; --surface:#ffffff; --surface2:#f7f8f3;
+    --ink:#1a1e19; --muted:#5c625a; --line:#dfe3d8;
+    --green:#2f5d3a; --amber:#c07d1f;
+    --do:#2f7d4f; --do-bg:rgba(47,125,79,.10);
+    --dont:#b5122e; --dont-bg:rgba(181,18,46,.07);
+    --warn:#9a6612; --warn-bg:#fbf1d8;
+    --shadow:0 1px 3px rgba(20,30,20,.06),0 8px 24px rgba(20,30,20,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#10130e; --surface:#191d15; --surface2:#1f241a;
+      --ink:#e9ece1; --muted:#a1a795; --line:#2c3225;
+      --green:#7bb98a; --amber:#e3a144;
+      --do:#5fbd83; --do-bg:rgba(95,189,131,.12);
+      --dont:#e26b7f; --dont-bg:rgba(226,107,127,.11);
+      --warn:#e3b866; --warn-bg:#2a2410;
+      --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#10130e; --surface:#191d15; --surface2:#1f241a;
+    --ink:#e9ece1; --muted:#a1a795; --line:#2c3225;
+    --green:#7bb98a; --amber:#e3a144;
+    --do:#5fbd83; --do-bg:rgba(95,189,131,.12);
+    --dont:#e26b7f; --dont-bg:rgba(226,107,127,.11);
+    --warn:#e3b866; --warn-bg:#2a2410;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:17px; line-height:1.62; letter-spacing:-.003em;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:680px;margin:0 auto;padding:0 20px 72px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- hero ---------- */
+  .hero{padding:46px 0 28px;border-bottom:1px solid var(--line);margin-bottom:32px}
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--green);font-weight:600;margin:0 0 14px;display:flex;align-items:center;gap:8px;
+  }
+  .eyebrow::before{content:"";width:26px;height:2px;background:var(--amber);display:inline-block}
+  h1{
+    font-size:clamp(2.1rem,8vw,3rem);line-height:1.04;margin:0 0 16px;
+    font-weight:800;letter-spacing:-.025em;text-wrap:balance;
+  }
+  .dek{font-size:1.12rem;color:var(--muted);margin:0 0 22px;text-wrap:pretty;max-width:52ch}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{
+    font-size:.78rem;background:var(--surface2);border:1px solid var(--line);
+    color:var(--muted);padding:5px 11px;border-radius:100px;font-weight:500;
+  }
+  .chip b{color:var(--ink);font-weight:700}
+
+  /* ---------- sections ---------- */
+  section{margin:0 0 40px}
+  h2{
+    font-size:1.4rem;line-height:1.2;margin:0 0 6px;font-weight:800;
+    letter-spacing:-.02em;text-wrap:balance;
+  }
+  .sec-eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--amber);font-weight:600;margin:0 0 4px;
+  }
+  h3{font-size:1.05rem;margin:26px 0 4px;font-weight:700;letter-spacing:-.01em;color:var(--green)}
+  p{margin:0 0 15px}
+  a{color:var(--green);text-underline-offset:3px;text-decoration-thickness:1px}
+  strong{font-weight:700}
+  ul{margin:0 0 15px;padding-left:1.15em}
+  li{margin:0 0 8px}
+
+  /* ---------- TL;DR key findings ---------- */
+  .tldr{
+    background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    padding:22px 20px 8px;box-shadow:var(--shadow);margin:0 0 40px;
+  }
+  .tldr h2{font-size:1.15rem;margin-bottom:16px}
+  .finding{display:flex;gap:14px;padding:0 0 16px;align-items:flex-start}
+  .finding .n{
+    flex:none;width:26px;height:26px;border-radius:8px;background:var(--green);
+    color:var(--surface);font-weight:800;font-size:.85rem;
+    display:flex;align-items:center;justify-content:center;margin-top:2px;
+    font-family:ui-monospace,monospace;
+  }
+  .finding p{margin:0;font-size:.97rem}
+
+  /* ---------- callout ---------- */
+  .callout{
+    background:var(--warn-bg);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);
+    border-radius:12px;padding:14px 16px;font-size:.92rem;margin:0 0 22px;color:var(--ink);
+  }
+  .callout b{color:var(--warn)}
+
+  /* ---------- data table (sell-out times) ---------- */
+  .tbl{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:6px 0 18px}
+  .tbl .r{display:flex;justify-content:space-between;gap:12px;padding:11px 15px;font-size:.93rem;border-top:1px solid var(--line)}
+  .tbl .r:first-child{border-top:0;background:var(--surface2);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .tbl .r span:last-child{font-variant-numeric:tabular-nums;font-family:ui-monospace,monospace;color:var(--green);font-weight:600}
+  .tbl .r:first-child span:last-child{color:var(--muted);font-family:inherit}
+
+  /* ---------- do / don't rows ---------- */
+  .rules{display:flex;flex-direction:column;gap:8px;margin:8px 0 8px}
+  .rule{
+    display:flex;gap:12px;align-items:flex-start;padding:13px 15px;border-radius:12px;
+    border:1px solid var(--line);font-size:.94rem;
+  }
+  .rule.ok{background:var(--do-bg);border-color:color-mix(in srgb,var(--do) 30%,transparent)}
+  .rule.no{background:var(--dont-bg);border-color:color-mix(in srgb,var(--dont) 30%,transparent)}
+  .rule .mk{flex:none;font-weight:800;font-size:1.05rem;line-height:1.4}
+  .rule.ok .mk{color:var(--do)}
+  .rule.no .mk{color:var(--dont)}
+
+  /* ---------- sources ---------- */
+  .sources{margin-top:8px}
+  .sources h2{font-size:1.1rem}
+  .srcgrid{display:flex;flex-direction:column;gap:2px;font-size:.9rem}
+  .srcgrid a{display:inline-block;padding:6px 0}
+
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem;line-height:1.6}
+
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:4px}
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Research &amp; Recommendations</p>
+    <h1>Can a bot get you Glastonbury?</h1>
+    <p class="dek">Short answer: no — and for this festival specifically, trying actively lowers your odds. Here's how the sale really works, and what genuinely raises your chances.</p>
+    <div class="chips">
+      <span class="chip">Prepared <b>15 Aug 2026</b></span>
+      <span class="chip"><b>2026</b> is a fallow year</span>
+      <span class="chip">Next sale <b>~Nov 2026</b> (2027 festival)</span>
+    </div>
+  </header>
+
+  <div class="tldr">
+    <h2>The six things that matter</h2>
+    <div class="finding"><div class="n">1</div><p><strong>Glastonbury is the one big festival where a purchase bot is close to useless.</strong> Since 2024 the sale runs on a <strong>random queue</strong>: everyone on the page at kick-off gets a random place. Speed, refreshing and extra devices don't move you up — they can get your IP flagged and removed.</p></div>
+    <div class="finding"><div class="n">2</div><p><strong>You can't resell a Glastonbury ticket</strong>, so the whole economic reason bots exist doesn't apply. Tickets are non-transferable, carry the holder's <strong>photo</strong>, and are ID-checked at the gate.</p></div>
+    <div class="finding"><div class="n">3</div><p><strong>A bot that automates the real checkout is against See Tickets' terms and probably a criminal offence</strong> under the Digital Economy Act 2017 (unlimited fine in England &amp; Wales).</p></div>
+    <div class="finding"><div class="n">4</div><p><strong>"People use AI to guarantee tickets" is mostly myth or marketing.</strong> Guaranteed-ticket services are largely scams; the real bot scene targets resale-heavy sites, where anti-bot vendors now block ~98% of bot traffic.</p></div>
+    <div class="finding"><div class="n">5</div><p><strong>What actually works is legitimate and boring:</strong> everyone registered, a group of up to six, one fast wired device each, payment ready, on the page early — and <em>don't refresh</em>.</p></div>
+    <div class="finding"><div class="n">6</div><p><strong>The right thing to build and test is your own execution</strong> — a local rehearsal simulator that drills the queue → form → payment flow, never touching See Tickets.</p></div>
+  </div>
+
+  <section>
+    <p class="sec-eyebrow">01 — Mechanism</p>
+    <h2>How the sale actually works</h2>
+    <p>Understanding the mechanism is the whole game, because it's unlike a normal Ticketmaster drop.</p>
+
+    <h3>Registration is the real gate</h3>
+    <p>You must register in advance at <span class="mono">glastonburyregistration.co.uk</span> with contact details and a passport-style photo. <strong>Every person</strong> who wants a ticket (age 13+) needs <strong>their own registration number</strong> before the sale. Un-registered people simply can't buy. Older registrations (pre-2020) are periodically asked to refresh their photo — check yours is valid well ahead.</p>
+
+    <h3>The sale</h3>
+    <p>Tickets are sold <strong>only</strong> at <span class="mono">glastonbury.seetickets.com</span>. Anywhere else is a scam. Sales come in waves: <strong>coach + ticket packages first</strong> (a Thursday), then <strong>general admission</strong> (the following Sunday) — for 2027, expect this around November 2026. One person can buy up to <strong>six</strong> tickets, entering each attendee's registration number + surname plus a deposit (~£75/ticket); the balance is due in spring.</p>
+
+    <h3>The random queue — the decisive change</h3>
+    <p>If you're on the page <strong>when it opens</strong>, you're placed <strong>randomly</strong> in the queue. Arrive after kick-off and you go to the back. <strong>Refreshing can lose your place</strong> and look like bot behaviour; multiple tabs or devices can trigger anti-bot software and get your IP blocked. The sale is now a <strong>lottery among everyone present at the snapshot</strong>, not a race — which is exactly what defeats refresh-bots.</p>
+
+    <h3>Anti-touting — why reselling is a dead end</h3>
+    <p>Tickets are non-transferable and show the holder's photo; only that person is admitted. Private resale is prohibited and gets the order cancelled. Genuine spares are resold <strong>at face value through See Tickets</strong> in official resale windows, which sell out in ~30 minutes too.</p>
+
+    <h3>How fast does it sell out?</h3>
+    <p>Fast, but not milliseconds — which matters for what "automation" could even buy you:</p>
+    <div class="tbl">
+      <div class="r"><span>Sale</span><span>Sold out in</span></div>
+      <div class="r"><span>2025 coach + packages (Nov '24)</span><span>~32 min</span></div>
+      <div class="r"><span>2025 general admission (Nov '24)</span><span>~35 min</span></div>
+      <div class="r"><span>2025 coach resale (Apr '25)</span><span>~31 min</span></div>
+      <div class="r"><span>2024 coach resale</span><span>~18 min</span></div>
+    </div>
+    <p>Thirty-plus minutes means the constraint is <strong>whether the random queue lets you in</strong>, then <strong>how fast and accurately you fill the form</strong> — not raw request speed.</p>
+  </section>
+
+  <section>
+    <p class="sec-eyebrow">02 — The "AI guarantee" claim</p>
+    <h2>What's real and what isn't</h2>
+    <p><strong>Nobody can guarantee a Glastonbury ticket, and anyone selling that is selling a scam.</strong></p>
+    <ul>
+      <li><strong>Guaranteed-ticket / "AI bot" services for sale</strong> — treat as fraud. There is no product that guarantees a photo-locked, registration-gated, random-queue ticket. At best they take your money; at worst, your credentials.</li>
+      <li><strong>The genuine ticket-bot scene</strong> targets high-resale-value, first-come inventory (the Ticketmaster world). Glastonbury has no resale value, so the incentive that funds serious bots isn't there.</li>
+      <li><strong>The anti-bot industry has caught up.</strong> Platforms use Queue-it, Akamai and Cloudflare. Public figures: ~98% of traffic mitigated on a hype event, &gt;50% of blocked bots share one IP, and genuine fans ~50× more likely to get in once mitigation is on.</li>
+      <li><strong>What "AI" realistically does</strong> is narrow: solving or bypassing CAPTCHAs, rotating fingerprints/IPs, reading page state. Against a random queue + photo lock, none of that produces a ticket — it just raises your ban risk.</li>
+    </ul>
+    <h3>Real-world attempts (now largely obsolete)</h3>
+    <p>Open-source tools like <span class="mono">glasto-helper</span> (a Puppeteer refresh app) worked in the old refresh-based era: ~15 browsers reloading the holding page just under the rate limit, jumping to whichever tab reached the ticket page. The 2024 move to a random queue removes the thing they optimised — the technique that used to work is now the technique the system is designed to punish.</p>
+  </section>
+
+  <section>
+    <p class="sec-eyebrow">03 — Legal &amp; terms</p>
+    <h2>Read this before writing any code</h2>
+    <p>Not legal advice, but the landscape is clear enough to plan around:</p>
+    <ul>
+      <li><strong>Digital Economy Act 2017 (s.106) + Breaching Limits on Ticket Sales Regulations 2018.</strong> It's a criminal offence to use software to obtain tickets in excess of a seller's limit. Penalty: unlimited fine (England &amp; Wales); up to £50,000 (Scotland).</li>
+      <li><strong>See Tickets' terms</strong> prohibit automated access, bots, and circumventing access controls. Breach → order cancelled, account/IP blocked.</li>
+      <li><strong>Computer Misuse Act 1990.</strong> Deliberately circumventing technical access controls can raise unauthorised-access questions.</li>
+      <li><strong>What you'll hit first:</strong> the anti-bot layer flags you, your IP is blocked, and you're out of <em>this</em> sale — the worst outcome for a fan.</li>
+    </ul>
+    <h3>Where the line sits</h3>
+    <div class="rules">
+      <div class="rule ok"><span class="mk">✓</span><span>Pre-registering everyone; preparing payment; being ready to type fast — <strong>encouraged by the Festival</strong>.</span></div>
+      <div class="rule ok"><span class="mk">✓</span><span>Practising the checkout flow on a <strong>local mock</strong> you control.</span></div>
+      <div class="rule ok"><span class="mk">✓</span><span>A shared checklist / countdown / "who covers which registration numbers" plan.</span></div>
+      <div class="rule no"><span class="mk">✕</span><span>A script that auto-refreshes or holds a queue slot on the <strong>live</strong> site — against ToS, counter-productive, ban risk.</span></div>
+      <div class="rule no"><span class="mk">✕</span><span>A script that auto-fills or auto-submits the <strong>real</strong> purchase or payment — likely a DEA 2017 offence.</span></div>
+      <div class="rule no"><span class="mk">✕</span><span>Multiple devices / IPs / fingerprints for more queue entries — anti-bot trigger and IP ban.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-eyebrow">04 — Recommendation</p>
+    <h2>"Simulated testing" done the right way</h2>
+    <p>You spotted the core problem: there's no test period, so you can't prove a concept against the real sale. The professional answer to "I can't test against production" is <strong>build a faithful simulation and test against that.</strong> For Glastonbury, the thing worth optimising is your group's human execution — so that's what the simulation should exercise.</p>
+
+    <h3>What ships with this report</h3>
+    <p><strong>An offline rehearsal simulator</strong> — a single self-contained HTML file that reproduces the shape of the sale: a random-queue screen (practise waiting without refreshing), a booking form needing six registration numbers + exact surnames with the same validation traps, and a payment screen with a deliberate lockout mirroring See Tickets' ~10-minute freeze on fumbled card details. A stopwatch and error counter score each run. <strong>Zero network calls</strong> — it's a flight simulator, not an autopilot.</p>
+
+    <h3>A group readiness pack</h3>
+    <ul>
+      <li>A shared sheet with every member's registration number + exact surname, pre-verified, assigned so each buyer knows their six.</li>
+      <li>Payment details prepared and correct (UK debit / Visa / Mastercard; know the international-card rules).</li>
+      <li>A connection plan: wired ethernet or strong 5G, on the page a few minutes early, no other heavy downloads.</li>
+    </ul>
+
+    <h3>How to run the drills</h3>
+    <ul>
+      <li><strong>Individual:</strong> complete a booking in well under a minute, zero validation errors.</li>
+      <li><strong>Group:</strong> everyone tries; whoever gets in reads registration numbers aloud while another checks — rehearse the hand-off.</li>
+      <li><strong>Failure injection:</strong> deliberately fumble a card to feel the lockout; practise recovering calmly.</li>
+      <li><strong>Score and iterate:</strong> track time-to-complete and errors. That's your KPI — not requests per second.</li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="sec-eyebrow">05 — The plan</p>
+    <h2>The realistic play for 2027</h2>
+    <ul>
+      <li><strong>Now → autumn 2026:</strong> make sure everyone in your group of up to six is registered with a current photo. This is the single biggest determinant of success.</li>
+      <li><strong>When dates drop (autumn 2026):</strong> diary both the coach/package sale (first) and general admission (second). Coach is a genuine second bite.</li>
+      <li><strong>Rehearse</strong> until form-filling is muscle memory.</li>
+      <li><strong>On the day:</strong> everyone on one fast device each, on the page early, payment ready — then <strong>do not refresh</strong>. A full group of six multiplies your collective odds.</li>
+      <li><strong>If you miss out:</strong> the official See Tickets resale (spring) at face value is your legitimate second chance.</li>
+    </ul>
+    <div class="callout"><b>Bottom line.</b> Glastonbury deliberately engineered the sale so preparation and luck decide it, not code. The best "automation" you can build is a group that executes flawlessly — and that you <em>can</em> test.</div>
+  </section>
+
+  <section class="sources">
+    <h2>Sources</h2>
+    <div class="srcgrid">
+      <a href="https://www.glastonburyfestivals.co.uk/info/">Glastonbury Festivals — Info &amp; Tickets</a>
+      <a href="https://feeds.bbci.co.uk/news/articles/c62l9yw3kpqo">BBC — Glastonbury's big change to ticket booking</a>
+      <a href="https://www.timeout.com/uk/news/glastonbury-ticket-sale-tips-103123">Time Out — Top tips for getting tickets</a>
+      <a href="https://www.ticketfairy.com/blog/case-study-glastonbury-festivals-ticket-registration-system">Ticket Fairy — Glastonbury's registration system (case study)</a>
+      <a href="https://github.com/JackOHara/glasto-helper">GitHub — glasto-helper (Puppeteer refresh app)</a>
+      <a href="https://www.nme.com/news/music/glastonbury-2025-coach-and-ticket-packages-sell-out-in-32-minutes-3812850">NME — 2025 packages sold out in 32 minutes</a>
+      <a href="https://www.prsformusic.com/m-magazine/news/ticket-scalping-bots-now-illegal-in-uk">PRS for Music — ticket bots now illegal in the UK</a>
+      <a href="https://crucible.law/insights/bots-and-touts-a-summary-of-offences-potentially-committed-by-bot-owners-and-ticket-resellers">Crucible Law — bots &amp; touts: offences summary</a>
+      <a href="https://queue-it.com/blog/ticket-bots/">Queue-it — everything about ticket bots</a>
+      <a href="https://ticket-squad.io/guides/glastonbury-tickets">TicketSquad — when do 2027 tickets go on sale?</a>
+    </div>
+  </section>
+
+  <footer>
+    A research summary for personal ticket-buying preparation. No affiliation with Glastonbury Festival or See Tickets. Buy only at glastonbury.seetickets.com. Figures cited from public reporting current to mid-2026.
+  </footer>
+
+</div>
