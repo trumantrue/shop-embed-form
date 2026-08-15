@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glastonbury Sale — Offline Rehearsal Simulator</title>
+<style>
+  :root{
+    --bg:#f4f1ea; --card:#fff; --ink:#1c1a17; --muted:#6b6459;
+    --accent:#b5122e; --accent2:#1e6f5c; --line:#ddd6c9; --warn:#a8600a;
+    --ok:#1e6f5c; --bad:#b5122e; --shadow:0 2px 14px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#17150f; --card:#211e17; --ink:#f2ede2; --muted:#a49c8c;
+      --line:#3a352a; --shadow:0 2px 14px rgba(0,0,0,.4); }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--ink)}
+  .wrap{max-width:620px;margin:0 auto;padding:24px 18px 60px}
+  header h1{font-size:1.35rem;margin:0 0 2px}
+  header p{color:var(--muted);margin:0 0 18px;font-size:.9rem}
+  .banner{background:#fff4d6;color:#5a4300;border:1px solid #e6cf88;
+    border-radius:10px;padding:10px 12px;font-size:.82rem;margin-bottom:18px}
+  @media (prefers-color-scheme: dark){.banner{background:#2c2410;color:#e7cf8f;border-color:#5a4a1c}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:22px;box-shadow:var(--shadow);margin-bottom:16px}
+  h2{font-size:1.1rem;margin:0 0 6px}
+  label{display:block;font-size:.8rem;color:var(--muted);margin:12px 0 4px;font-weight:600}
+  input{width:100%;padding:11px 12px;font-size:1rem;border:1px solid var(--line);
+    border-radius:9px;background:var(--bg);color:var(--ink)}
+  input:focus{outline:2px solid var(--accent2);outline-offset:1px}
+  input.err{border-color:var(--bad);background:rgba(181,18,46,.06)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hint{font-size:.72rem;color:var(--muted);margin-top:3px}
+  .fielderr{font-size:.72rem;color:var(--bad);margin-top:3px;min-height:.9em}
+  button{cursor:pointer;font:inherit;font-weight:700;border:0;border-radius:10px;
+    padding:13px 18px;background:var(--accent);color:#fff;width:100%}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .queue{text-align:center;padding:40px 20px}
+  .spinner{width:54px;height:54px;border:5px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;margin:0 auto 18px;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .qpos{font-size:2rem;font-weight:800;color:var(--accent)}
+  .clock{position:sticky;top:0;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;
+    align-items:center;margin-bottom:16px;font-variant-numeric:tabular-nums}
+  .clock b{font-size:1.3rem}
+  .stat{font-size:.78rem;color:var(--muted)}
+  .stat.bad{color:var(--bad);font-weight:700}
+  .lockout{background:rgba(181,18,46,.08);border:1px solid var(--bad);border-radius:10px;
+    padding:14px;color:var(--bad);font-weight:600;text-align:center}
+  .done{text-align:center;padding:20px}
+  .done .big{font-size:2.2rem;font-weight:800;color:var(--ok);margin:6px 0}
+  .scoreline{display:flex;justify-content:space-between;border-top:1px dashed var(--line);
+    padding:8px 0;font-size:.9rem}
+  .refreshwatch{font-size:.72rem;color:var(--warn);margin-top:8px;text-align:center}
+  footer{color:var(--muted);font-size:.72rem;text-align:center;margin-top:24px;line-height:1.6}
+  .pill{display:inline-block;background:var(--accent2);color:#fff;font-size:.68rem;
+    padding:2px 8px;border-radius:20px;font-weight:700;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Glastonbury Sale — Rehearsal Simulator <span class="pill">OFFLINE</span></h1>
+    <p>Drill the queue → form → payment flow for speed and accuracy. This runs entirely in your browser and <strong>never contacts See Tickets or any server</strong>.</p>
+  </header>
+
+  <div class="banner">
+    ⚠️ This is a <strong>practice mock</strong>, not a tool for the real sale. On the day, buy only at <strong>glastonbury.seetickets.com</strong>, use one device per person, prepare your details, and <strong>do not refresh</strong> — the real queue is random and refreshing can get you flagged.
+  </div>
+
+  <div id="app"></div>
+
+  <footer>
+    Everything here is fictional. No real registration numbers, cards, or network requests are used.<br>
+    Goal: complete a clean booking in well under a minute, with zero errors. Practise until it's muscle memory.
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const app = document.getElementById('app');
+  let state = {};
+  let tick = null;
+
+  // ---- deterministic helpers (no Math.random dependence on wall clock needed;
+  //      but variety across runs is fine here since this is local practice) ----
+  function rand(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+  function fmt(ms){
+    const s = Math.floor(ms/1000), m = Math.floor(s/60);
+    return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+  }
+
+  function reset(){
+    state = {
+      screen:'start', startTime:0, elapsed:0,
+      refreshes:0, errors:0, lockedUntil:0, queuePos:0, targetWait:0
+    };
+    // catch attempts to refresh/leave (learning cue only)
+    render();
+  }
+
+  // ---------- SCREENS ----------
+  function screenStart(){
+    app.innerHTML = `
+      <div class="card">
+        <h2>Ready to rehearse?</h2>
+        <p style="color:var(--muted);font-size:.9rem">You'll be put in a <strong>random</strong> queue (like the real 2024+ system), then asked to enter six registration numbers + surnames, lead-booker details, and a deposit payment. A timer and error counter score your run.</p>
+        <label>Your group name (optional)</label>
+        <input id="grp" placeholder="e.g. The Pyramid Six" autocomplete="off">
+        <div style="height:14px"></div>
+        <button id="go">Join the queue</button>
+        <button class="ghost" id="tips" style="margin-top:10px">Show the real-day checklist</button>
+      </div>`;
+    document.getElementById('go').onclick = startQueue;
+    document.getElementById('tips').onclick = showTips;
+  }
+
+  function showTips(){
+    app.innerHTML = `
+      <div class="card">
+        <h2>Real-day checklist</h2>
+        <ul style="font-size:.9rem;line-height:1.7;padding-left:18px">
+          <li>Everyone (up to 6) <strong>registered</strong> with a current photo — numbers written down.</li>
+          <li><strong>One device each</strong>, wired ethernet or strong 5G. No extra tabs.</li>
+          <li>On <strong>glastonbury.seetickets.com</strong> a few minutes early.</li>
+          <li>Payment ready: UK debit / Visa / Mastercard; know international-card rules.</li>
+          <li>When it opens: <strong>wait</strong>. Do not refresh — position is random and fixed.</li>
+          <li>If you get in: enter reg number + <em>exact</em> surname for all six, fast and correct.</li>
+          <li>Wrong card details can freeze you ~10 minutes — get payment right first time.</li>
+        </ul>
+        <button class="ghost" id="back">Back</button>
+      </div>`;
+    document.getElementById('back').onclick = screenStart;
+  }
+
+  function startQueue(){
+    const name = (document.getElementById('grp')||{}).value || 'Your group';
+    state.group = name;
+    state.screen='queue';
+    state.startTime = performance.now();
+    state.queuePos = rand(3000, 42000);       // random queue position, like real life
+    state.targetWait = rand(4000, 9000);      // simulated wait (compressed)
+    state.queueStart = performance.now();
+    startClock();
+    renderQueue();
+  }
+
+  function startClock(){
+    if(tick) clearInterval(tick);
+    tick = setInterval(()=>{
+      state.elapsed = performance.now() - state.startTime;
+      // update clock display if present
+      const c = document.getElementById('clk'); if(c) c.textContent = fmt(state.elapsed);
+      const rc = document.getElementById('refc'); if(rc) rc.textContent = state.refreshes;
+      const ec = document.getElementById('errc'); if(ec) ec.textContent = state.errors;
+      // queue progression
+      if(state.screen==='queue'){
+        const prog = (performance.now()-state.queueStart)/state.targetWait;
+        const pos = Math.max(0, Math.round(state.queuePos*(1-prog)));
+        const pe = document.getElementById('qpos'); if(pe) pe.textContent = pos.toLocaleString();
+        if(prog>=1){ state.screen='form'; renderForm(); }
+      }
+      // lockout countdown
+      if(state.lockedUntil && performance.now()>state.lockedUntil){
+        state.lockedUntil=0; renderPayment();
+      }
+    }, 100);
+  }
+
+  function clockBar(){
+    return `<div class="clock">
+      <span class="stat">⏱ <b id="clk">${fmt(state.elapsed)}</b></span>
+      <span class="stat">refreshes: <b id="refc">${state.refreshes}</b></span>
+      <span class="stat ${state.errors?'bad':''}">errors: <b id="errc">${state.errors}</b></span>
+    </div>`;
+  }
+
+  function renderQueue(){
+    app.innerHTML = clockBar() + `
+      <div class="card queue">
+        <div class="spinner"></div>
+        <p style="color:var(--muted);margin:0 0 6px">You are in the queue. Please do not refresh.</p>
+        <div class="qpos"><span id="qpos">${state.queuePos.toLocaleString()}</span></div>
+        <p class="stat">people ahead of you (randomly assigned)</p>
+        <button class="ghost" id="refresh" style="margin-top:18px">🔄 Refresh (don't!)</button>
+        <div class="refreshwatch" id="rw"></div>
+      </div>`;
+    document.getElementById('refresh').onclick = ()=>{
+      state.refreshes++;
+      // penalty: real system can send you to the back / flag you
+      state.queuePos += rand(2000,8000);
+      state.queueStart = performance.now(); // lose progress
+      document.getElementById('rw').textContent =
+        'Refreshing sent you further back — this is exactly what to avoid on the day.';
+      const pe=document.getElementById('qpos'); if(pe) pe.textContent = state.queuePos.toLocaleString();
+    };
+  }
+
+  // fake but format-checkable data the user must transcribe accurately
+  const REG_SAMPLE = ['GLS-48213-QA','GLS-77105-KB','GLS-30902-LM','GLS-61548-RT','GLS-22087-ZC','GLS-90431-DW'];
+  const SURNAMES  = ['Okafor','Nguyen','MacleodMcphee','Zieliński','Fernandes','Abernathy'];
+
+  function renderForm(){
+    if(tick) startClock();
+    let rows='';
+    for(let i=0;i<6;i++){
+      rows += `
+        <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:8px">
+          <div class="stat">Attendee ${i+1} — <strong>copy exactly:</strong> ${REG_SAMPLE[i]} / ${SURNAMES[i]}</div>
+          <div class="row">
+            <div>
+              <label>Registration number</label>
+              <input id="reg${i}" placeholder="GLS-#####-XX" autocomplete="off">
+              <div class="fielderr" id="regE${i}"></div>
+            </div>
+            <div>
+              <label>Surname</label>
+              <input id="sur${i}" placeholder="Surname" autocomplete="off">
+              <div class="fielderr" id="surE${i}"></div>
+            </div>
+          </div>
+        </div>`;
+    }
+    app.innerHTML = clockBar() + `
+      <div class="card">
+        <h2>You're in! Booking form <span class="pill">up to 6</span></h2>
+        <p class="stat">Enter each attendee's registration number and <strong>exact</strong> surname. Typos cost you time.</p>
+        ${rows}
+        <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:10px">
+          <label>Lead booker email</label>
+          <input id="email" placeholder="you@example.com" autocomplete="off">
+          <div class="fielderr" id="emailE"></div>
+        </div>
+        <div style="height:14px"></div>
+        <button id="submit">Continue to payment</button>
+      </div>`;
+    document.getElementById('submit').onclick = submitForm;
+  }
+
+  function submitForm(){
+    let ok=true;
+    for(let i=0;i<6;i++){
+      const reg=document.getElementById('reg'+i), sur=document.getElementById('sur'+i);
+      const regE=document.getElementById('regE'+i), surE=document.getElementById('surE'+i);
+      reg.classList.remove('err'); sur.classList.remove('err'); regE.textContent=''; surE.textContent='';
+      if(reg.value.trim()!==REG_SAMPLE[i]){ reg.classList.add('err'); regE.textContent='Does not match registration.'; state.errors++; ok=false; }
+      if(sur.value.trim()!==SURNAMES[i]){ sur.classList.add('err'); surE.textContent='Surname must match exactly.'; state.errors++; ok=false; }
+    }
+    const email=document.getElementById('email'), emailE=document.getElementById('emailE');
+    email.classList.remove('err'); emailE.textContent='';
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())){ email.classList.add('err'); emailE.textContent='Enter a valid email.'; state.errors++; ok=false; }
+    if(ok){ state.screen='payment'; renderPayment(); }
+    else { const ec=document.getElementById('errc'); if(ec) ec.textContent=state.errors; }
+  }
+
+  function renderPayment(){
+    if(state.lockedUntil && performance.now()<state.lockedUntil){
+      const left=Math.ceil((state.lockedUntil-performance.now())/1000);
+      app.innerHTML = clockBar() + `
+        <div class="card">
+          <h2>Payment</h2>
+          <div class="lockout">🔒 Card details rejected — you're temporarily locked out for ${left}s.<br>
+          <span style="font-weight:400;font-size:.8rem">On the real site a fumbled card can freeze you up to ~10 minutes. This is why you prepare payment in advance.</span></div>
+        </div>`;
+      return;
+    }
+    app.innerHTML = clockBar() + `
+      <div class="card">
+        <h2>Payment — deposit</h2>
+        <p class="stat">Deposit due now: <strong>£450.00</strong> (6 × £75). Enter test card exactly: <strong>4242 4242 4242 4242</strong>, exp <strong>12/29</strong>, CVC <strong>123</strong>.</p>
+        <label>Card number</label>
+        <input id="card" placeholder="4242 4242 4242 4242" inputmode="numeric" autocomplete="off">
+        <div class="row">
+          <div><label>Expiry</label><input id="exp" placeholder="MM/YY" autocomplete="off"></div>
+          <div><label>CVC</label><input id="cvc" placeholder="123" inputmode="numeric" autocomplete="off"></div>
+        </div>
+        <div class="fielderr" id="payE"></div>
+        <div style="height:12px"></div>
+        <button id="pay">Pay £450.00 deposit</button>
+      </div>`;
+    document.getElementById('pay').onclick = pay;
+  }
+
+  function pay(){
+    const card=document.getElementById('card').value.replace(/\s+/g,'');
+    const exp=document.getElementById('exp').value.trim();
+    const cvc=document.getElementById('cvc').value.trim();
+    const payE=document.getElementById('payE');
+    if(card==='4242424242424242' && exp==='12/29' && cvc==='123'){
+      finish();
+    } else {
+      state.errors++;
+      const ec=document.getElementById('errc'); if(ec) ec.textContent=state.errors;
+      // lockout penalty, compressed to 15s for practice
+      state.lockedUntil = performance.now()+15000;
+      payE.textContent='Card declined — details incorrect.';
+      renderPayment();
+    }
+  }
+
+  function finish(){
+    if(tick) clearInterval(tick);
+    const total = state.elapsed;
+    let grade='Solid';
+    if(total<45000 && state.errors===0 && state.refreshes===0) grade='🏆 Sale-ready';
+    else if(total<75000 && state.errors<=1) grade='Good — tighten it up';
+    else grade='Keep drilling';
+    app.innerHTML = `
+      <div class="card done">
+        <div class="stat">Booking confirmed (simulated) for</div>
+        <div class="big">${(state.group||'Your group')} 🎪</div>
+        <div class="scoreline"><span>Time to complete</span><strong>${fmt(total)}</strong></div>
+        <div class="scoreline"><span>Form/payment errors</span><strong>${state.errors}</strong></div>
+        <div class="scoreline"><span>Refreshes (penalty)</span><strong>${state.refreshes}</strong></div>
+        <div class="scoreline"><span>Verdict</span><strong>${grade}</strong></div>
+        <div style="height:16px"></div>
+        <button id="again">Run it again</button>
+        <p class="stat" style="margin-top:14px">Target: under 00:45, zero errors, zero refreshes. Then do it as a group with reg numbers read aloud.</p>
+      </div>`;
+    document.getElementById('again').onclick = reset;
+  }
+
+  function render(){
+    if(state.screen==='start') screenStart();
+    else if(state.screen==='queue') renderQueue();
+    else if(state.screen==='form') renderForm();
+    else if(state.screen==='payment') renderPayment();
+  }
+
+  reset();
+})();
+</script>
+</body>
+</html>
