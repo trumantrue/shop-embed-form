@@ -35,8 +35,8 @@ for (let i = 1; i <= COUNT; i++) {
     confirmChecks: 2,
     blockAssets: false,
     country: null,
-    progressSelector: '#bar',
-    maskSelectors: ['#bar-wrap'],
+    progressSelector: '.qbar',
+    maskSelectors: ['.qbar'],
   }, null, 2) + '\n');
 
   // Only the first site/monitor service carries a build: stanza; the rest
@@ -47,9 +47,7 @@ for (let i = 1; i <= COUNT; i++) {
   yml += `  site-${i}:
     image: site-monitor-testsite:local
 ${siteBuild}    environment:
-      PROGRESS_MIN_SECONDS: \${PROGRESS_MIN_SECONDS:-600}
-      PROGRESS_MAX_SECONDS: \${PROGRESS_MAX_SECONDS:-2400}
-      TOTAL_SEGMENTS: \${TOTAL_SEGMENTS:-33}
+      QUEUE_SIZE: \${QUEUE_SIZE:-1000}
     restart: unless-stopped
 
   mon-${i}:

@@ -1,61 +1,67 @@
 // Simulated target site for testing the monitor's alert + takeover flow.
 //
-// The page shows a segmented progress bar (styled after the reference
-// screenshot: dark track, green segments, partial last segment) that fills
-// at a per-instance random rate: a full fill takes a random duration in
-// [PROGRESS_MIN_SECONDS, PROGRESS_MAX_SECONDS], chosen at start/reset.
-// When the bar reaches 100% the page flips to a data-input form.
-// Submissions are recorded in memory so you can verify that remote browser
-// control actually worked.
+// The page is a virtual waiting-room QUEUE. It shows the segmented queue bar
+// from the front-end handover: a full row of fixed green segments is laid
+// across the track from first paint, and a grey mask anchored to the right
+// retracts as the queue position falls, uncovering segments left-to-right.
+// (Mask, track and border are the same grey, so the mask reads as empty
+// track — it is a REVEAL, not a fill.)
 //
-//   GET  /            progress page or form, depending on state
+// Per the handover's §10 architectural note, the component does NOT own the
+// countdown: the server is the source of truth (needed so the monitor can
+// cross-check what it reads off the screen), and the page renders the
+// position it is given. Position is derived from a start timestamp, so it is
+// drift-free and survives a reload.
+//
+//   Queue size ...... QUEUE_SIZE (default 1000), configurable
+//   Start position .. random 1..QUEUE_SIZE at start/reset
+//   Decrement ....... 1 per second, floored at 0
+//   Admit ........... position reaches 0 -> flip to the data-input form
+//                     (admit at 0, not <=1, so the bar visibly completes)
+//
+//   GET  /            queue page or form, depending on state
 //   POST /submit      records the form submission
-//   GET  /status      JSON: state, progress, fill duration, submission count
+//   GET  /status      JSON: state, progress, position, startPosition, queueSize
 //   GET  /submissions JSON: everything submitted so far
-//   POST /reset       back to 0%, picks a new random fill duration
+//   POST /reset       re-arm with a new random start position
 //   GET  /healthz     ok
-//
-// Progress is computed from wall-clock (startAt + fillSeconds), not a timer,
-// so it survives any pause and needs no interval. The page updates itself
-// by polling /status every 2s and re-rendering the bar client-side (no page
-// reload, so a watcher's screenshot and a noVNC viewer both see it live).
 
 const http = require('http');
 const { URLSearchParams } = require('url');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
-const PROGRESS_MIN_SECONDS = parseInt(process.env.PROGRESS_MIN_SECONDS || '600', 10);
-const PROGRESS_MAX_SECONDS = parseInt(process.env.PROGRESS_MAX_SECONDS || '2400', 10);
-// Segment count measured from the reference screenshot (~33 full segments
-// assuming uniform track padding at both ends). Override if re-measured.
-const TOTAL_SEGMENTS = parseInt(process.env.TOTAL_SEGMENTS || '33', 10);
+const QUEUE_SIZE = parseInt(process.env.QUEUE_SIZE || '1000', 10);
 
-let fillSeconds = 0;
+let startPosition = 0;
 let startAt = 0;
-let flipLogged = false;
+let admitLogged = false;
 const submissions = [];
 
 function arm() {
-  fillSeconds = Math.round(
-    PROGRESS_MIN_SECONDS + Math.random() * Math.max(0, PROGRESS_MAX_SECONDS - PROGRESS_MIN_SECONDS));
+  startPosition = Math.floor(Math.random() * QUEUE_SIZE) + 1; // 1..QUEUE_SIZE
   startAt = Date.now();
-  flipLogged = false;
-  console.log(`[test-site] armed: full fill in ${fillSeconds}s ` +
-    `(completes ~${new Date(startAt + fillSeconds * 1000).toISOString()})`);
+  admitLogged = false;
+  console.log(`[test-site] armed: queue position ${startPosition}/${QUEUE_SIZE} ` +
+    `(admits in ~${startPosition}s)`);
 }
 
-function progressNow() {
-  if (!startAt) return 0;
-  return Math.min(1, (Date.now() - startAt) / (fillSeconds * 1000));
+function positionNow() {
+  if (!startAt) return QUEUE_SIZE;
+  const elapsedSec = Math.floor((Date.now() - startAt) / 1000);
+  return Math.max(0, startPosition - elapsedSec);
+}
+
+function progressFrom(position) {
+  return (QUEUE_SIZE - position) / QUEUE_SIZE; // 0..1
 }
 
 function stateNow() {
-  const done = progressNow() >= 1;
-  if (done && !flipLogged) {
-    flipLogged = true;
-    console.log(`[test-site] progress complete — flipped to FORM at ${new Date().toISOString()}`);
+  const admitted = positionNow() <= 0;
+  if (admitted && !admitLogged) {
+    admitLogged = true;
+    console.log(`[test-site] admitted — flipped to FORM at ${new Date().toISOString()}`);
   }
-  return done ? 'form' : 'progress';
+  return admitted ? 'form' : 'progress';
 }
 
 function esc(s) {
@@ -65,31 +71,59 @@ function esc(s) {
 }
 
 function pageShell(body) {
-  // Static text only — the only text change the monitor should ever see is
-  // the flip to the form. The bar itself carries no text (progress numbers
-  // live in data attributes), so bar growth is a pixel-only change that the
-  // watcher masks out.
+  // Handover colours: page ground dark, card #fff, body copy + track #4d4d4d.
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Monitor test target</title>
 <style>
-  body { font-family: Georgia, serif; background: #f5f2ea; color: #222; margin: 0; }
-  main { max-width: 720px; margin: 8vh auto; background: #fff; border: 1px solid #ddd;
-         border-radius: 8px; padding: 2.5rem 3rem; }
-  h1 { margin-top: 0; }
+  body { font-family: Georgia, serif; background: #1c1c1e; color: #4d4d4d; margin: 0; }
+  main { max-width: 960px; width: 100%; box-sizing: border-box; margin: 6vh auto;
+         background: #fff; border-radius: 4px; padding: 32px; }
+  h1 { margin-top: 0; color: #333; }
   label { display: block; margin: 1rem 0 0.25rem; font-weight: bold; }
   input, textarea { width: 100%; box-sizing: border-box; padding: 0.5rem;
                     border: 1px solid #bbb; border-radius: 4px; font-size: 1rem; }
   button { margin-top: 1.25rem; padding: 0.6rem 1.5rem; font-size: 1rem;
-           background: #2d5f3f; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
-  /* Segmented progress bar, after the reference screenshot: dark uniform
-     track, green segments with a small gap, partial last segment. */
-  #bar-wrap { background: #3f3f3f; border-radius: 5px; padding: 14px 16px;
-              width: fit-content; max-width: 100%; overflow: hidden; }
-  #bar { display: flex; gap: 4px; height: 56px; }
-  .seg { width: 14px; flex: none; background: #2ecc80; border-radius: 2px; }
+           background: #35be86; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+
+  /* Queue bar — verbatim from the handover §7. Track, border and mask share
+     #4d4d4d so the mask is seamless. Segment is 24 tall in a 24 channel with
+     2px vertical margins; its 28px margin-box is clipped by overflow:hidden,
+     so segments meet the border top and bottom with no vertical gap. */
+  .qbar {
+    position: relative;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    height: 32px;
+    width: 100%;
+    margin: 32px 0;
+    overflow: hidden;
+    border: 4px solid #4d4d4d;
+    background: #4d4d4d;
+    box-sizing: border-box;
+  }
+  .qbar-seg {
+    margin: 2px;
+    height: 24px;
+    width: 16px;
+    background: #35be86;
+    flex: none;
+  }
+  .qbar-mask {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    background: #4d4d4d;
+    transition: width 1000ms linear;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .qbar-mask { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -100,30 +134,47 @@ ${body}
 </html>`;
 }
 
-function progressPage() {
+function queuePage() {
+  const position = positionNow();
+  const progress = progressFrom(position);
+  const maskWidth = ((1 - progress) * 100).toFixed(2);
+  // Server-render the mask at its true width (handover gotcha 1 & 3): no
+  // one-second sweep-up on load, and the bar is meaningful before hydration.
   return pageShell(`
-  <h1>Work in progress</h1>
-  <p>This page is filling a progress bar at its own pace. When it completes,
-     it will turn into a data-input form, and the monitor watching it should
-     raise an alert.</p>
-  <div id="bar-wrap"><div id="bar" data-progress="0" data-segments="${TOTAL_SEGMENTS}"></div></div>
+  <h1>You're in the queue</h1>
+  <p>Please wait — you'll be admitted automatically when it's your turn.
+     When you reach the front, this page becomes a data-input form and the
+     monitor watching it should raise an alert.</p>
+  <div class="qbar" role="progressbar" aria-label="Queue position"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="${(progress * 100).toFixed(0)}"
+       data-progress="${progress.toFixed(4)}">
+    <div class="qbar-mask" style="width:${maskWidth}%"></div>
+  </div>
 <script>
-  const TOTAL = ${TOTAL_SEGMENTS};
-  const bar = document.getElementById('bar');
-  function render(p) {
-    bar.setAttribute('data-progress', p.toFixed(4));
-    const filled = p * TOTAL;
-    const full = Math.floor(filled);
-    const frac = filled - full;
-    let html = '';
-    for (let i = 0; i < full; i++) html += '<div class="seg"></div>';
-    if (full < TOTAL && frac > 0.02) {
-      html += '<div class="seg" style="width:' + Math.round(frac * 14) + 'px"></div>';
+  const PITCH = 20; // 16px segment + 2px margin each side
+  const bar = document.querySelector('.qbar');
+  const mask = bar.querySelector('.qbar-mask');
+
+  function fillSegments() {
+    bar.querySelectorAll('.qbar-seg').forEach((el) => el.remove());
+    const width = bar.offsetWidth;
+    if (!width) return;
+    const count = Math.ceil(width / PITCH) + 1; // +1 overfills the right edge
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < count; i++) {
+      const seg = document.createElement('div');
+      seg.className = 'qbar-seg';
+      frag.appendChild(seg);
     }
-    // Invisible spacers keep the track its full width from 0%.
-    for (let i = Math.ceil(filled); i < TOTAL; i++) html += '<div class="seg" style="background:transparent"></div>';
-    bar.innerHTML = html;
+    bar.insertBefore(frag, mask);
   }
+
+  function render(progress) {
+    mask.style.width = ((1 - progress) * 100) + '%';
+    bar.setAttribute('data-progress', progress.toFixed(4));
+    bar.setAttribute('aria-valuenow', (progress * 100).toFixed(0));
+  }
+
   async function tick() {
     try {
       const s = await (await fetch('/status', { cache: 'no-store' })).json();
@@ -131,17 +182,26 @@ function progressPage() {
       render(s.progress);
     } catch (e) { /* transient; try again next tick */ }
   }
-  render(0);
-  tick();
-  setInterval(tick, 2000);
+
+  fillSegments();
+  // Poll at the tick interval; transition duration matches (1000ms) so the
+  // mask retracts continuously rather than in visible steps.
+  setInterval(tick, 1000);
+
+  let rt;
+  window.addEventListener('resize', () => {
+    clearTimeout(rt);
+    rt = setTimeout(fillSegments, 150);
+  });
 </script>
 `);
 }
 
 const formPage = pageShell(`
   <h1>We need your input</h1>
-  <p>The page has changed. If you are seeing this through the remote browser,
-     take control and fill in the form to prove the takeover works.</p>
+  <p>You've reached the front of the queue. If you are seeing this through the
+     remote browser, take control and fill in the form to prove the takeover
+     works.</p>
   <form method="POST" action="/submit">
     <label for="name">Name</label>
     <input id="name" name="name" required>
@@ -160,7 +220,7 @@ const server = http.createServer((req, res) => {
   };
 
   if (req.method === 'GET' && req.url === '/') {
-    return send(200, stateNow() === 'form' ? formPage : progressPage());
+    return send(200, stateNow() === 'form' ? formPage : queuePage());
   }
 
   if (req.method === 'POST' && req.url === '/submit') {
@@ -188,12 +248,14 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/status') {
+    const position = positionNow();
     return send(200, JSON.stringify({
       state: stateNow(),
-      progress: Number(progressNow().toFixed(4)),
-      fillSeconds,
+      progress: Number(progressFrom(position).toFixed(4)),
+      position,
+      startPosition,
+      queueSize: QUEUE_SIZE,
       startAt: startAt ? new Date(startAt).toISOString() : null,
-      totalSegments: TOTAL_SEGMENTS,
       submissions: submissions.length,
     }), 'application/json');
   }
@@ -204,7 +266,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/reset') {
     arm();
-    return send(200, JSON.stringify({ ok: true, fillSeconds }), 'application/json');
+    return send(200, JSON.stringify({ ok: true, startPosition, queueSize: QUEUE_SIZE }), 'application/json');
   }
 
   if (req.method === 'GET' && req.url === '/healthz') {
@@ -215,7 +277,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[test-site] listening on :${PORT} (segments=${TOTAL_SEGMENTS}, ` +
-    `fill range ${PROGRESS_MIN_SECONDS}-${PROGRESS_MAX_SECONDS}s)`);
+  console.log(`[test-site] listening on :${PORT} (queue size ${QUEUE_SIZE})`);
   arm();
 });

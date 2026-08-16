@@ -40,15 +40,17 @@ async function fleetState() {
       fetchJson(`${inst.site}/status`),
     ]);
     // Compare the watcher's screen-read against site truth AT THE MOMENT the
-    // watcher read it (the fill is linear: (t - startAt) / fillSeconds), not
-    // truth now — the read is up to one check-interval stale, which would
-    // otherwise register as a false mismatch on fast fills.
+    // watcher read it (the read is up to one check-interval stale, which would
+    // otherwise register as a false mismatch). The queue decrements 1/sec, so
+    // reconstruct the position at read time from startPosition + elapsed.
     let mismatch = false;
     if (watcher && site && watcher.progress !== null && site.state === 'progress' &&
-        watcher.lastCheckAt && site.startAt && site.fillSeconds) {
-      const atRead = Math.min(1, Math.max(0,
-        (new Date(watcher.lastCheckAt) - new Date(site.startAt)) / (site.fillSeconds * 1000)));
-      mismatch = Math.abs(watcher.progress - atRead) > 0.05;
+        watcher.lastCheckAt && site.startAt && site.queueSize &&
+        typeof site.startPosition === 'number') {
+      const elapsedSec = Math.floor((new Date(watcher.lastCheckAt) - new Date(site.startAt)) / 1000);
+      const posAtRead = Math.max(0, site.startPosition - elapsedSec);
+      const expected = (site.queueSize - posAtRead) / site.queueSize;
+      mismatch = Math.abs(watcher.progress - expected) > 0.05;
     }
     return { label: inst.label, novnc: inst.novnc, watcher, site, mismatch };
   }));

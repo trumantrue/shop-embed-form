@@ -234,15 +234,17 @@ async function main() {
       const p = await page.evaluate((sel) => {
         const el = document.querySelector(sel);
         if (!el) return null;
+        // The queue bar is a reveal: all segments are always present and a
+        // mask covers the un-reached ones. Progress is the data-progress
+        // attribute; "revealed" segments are derived from it for display.
         const attr = parseFloat(el.getAttribute('data-progress'));
-        const total = parseInt(el.getAttribute('data-segments'), 10) || 0;
-        const segs = el.querySelectorAll('.seg');
-        let filled = 0;
-        for (const s of segs) if (s.style.background !== 'transparent') filled++;
-        return { attr: isNaN(attr) ? null : attr, filled, total };
+        const total = el.querySelectorAll('.qbar-seg, .seg').length;
+        const prog = isNaN(attr) ? null : attr;
+        const revealed = prog !== null ? Math.round(prog * total) : 0;
+        return { attr: prog, revealed, total };
       }, cfg.progressSelector).catch(() => null);
       status.progress = p ? p.attr : null;
-      status.progressSegments = p && p.total ? `${p.filled}/${p.total}` : null;
+      status.progressSegments = p && p.total ? `${p.revealed}/${p.total}` : null;
     } else {
       status.progress = null;
       status.progressSegments = null;
