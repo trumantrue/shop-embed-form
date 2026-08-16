@@ -101,6 +101,17 @@ reusing the fleet images, runs ALONGSIDE the headful fleet:
   boot.sh (it's a test stack); `docker compose -f docker-compose.scale.yml down`
   to remove. **Currently running at 100 / pool 4.**
 - Whole 100-stack ≈ 750 MB vs ~30 GB for 100 headful containers (~40× less).
+- **VNC takeover (promote-one-on-demand).** 100 headless has no VNC, so a
+  single always-on headful browser + noVNC (`scale-takeover`, `monitor` image
+  with `TAKEOVER=1` → `takeover.js`, noVNC on `TAKEOVER_PORT` default 7500) is
+  re-pointable at any instance: the dashboard's per-cell **VNC** button POSTs
+  `/api/takeover/:id` → the takeover browser navigates to `/q/:id`, then the
+  client opens the noVNC URL. One slot (~350 MB); re-pointing supersedes. For
+  concurrent takeovers, add more `scale-takeover` services on more ports.
+  **One-time host step:** `tailscale serve --bg --tcp 7500 tcp://127.0.0.1:7500`
+  (persisted by tailscaled; re-run only if serve config is reset). VNC password
+  is the `.env` `VNC_PASSWORD`. Verified: click VNC → drive instance 42's form
+  over the tailnet.
 
 ## 1. MacBook-only smoke test (no Docker, no proxy) — verified
 
