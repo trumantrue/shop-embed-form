@@ -29,6 +29,10 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:${SCALE_DASH_PORT:-7400}/
+    # Hard memory cap: if the pool overshoots, the kernel OOM-kills only this
+    # container (it restarts) instead of starving a co-resident fleet. Size it
+    # above POOL_SIZE's footprint (~0.3-0.4GB per pooled page + ~0.5GB base).
+    mem_limit: ${SCALE_MEM:-2g}
     depends_on:
       - scale-site
     restart: unless-stopped
