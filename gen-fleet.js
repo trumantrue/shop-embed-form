@@ -39,19 +39,22 @@ for (let i = 1; i <= COUNT; i++) {
     maskSelectors: ['#bar-wrap'],
   }, null, 2) + '\n');
 
+  // Only the first site/monitor service carries a build: stanza; the rest
+  // reference the same image. 10 concurrent duplicate builds of the Chromium
+  // image once filled the mini's disk to 100% — never again.
+  const siteBuild = i === 1 ? `    build: ./test-site\n` : '';
+  const monBuild = i === 1 ? `    build:\n      context: .\n      dockerfile: docker/Dockerfile.monitor\n` : '';
   yml += `  site-${i}:
-    build: ./test-site
-    environment:
+    image: site-monitor-testsite:local
+${siteBuild}    environment:
       PROGRESS_MIN_SECONDS: \${PROGRESS_MIN_SECONDS:-600}
       PROGRESS_MAX_SECONDS: \${PROGRESS_MAX_SECONDS:-2400}
       TOTAL_SEGMENTS: \${TOTAL_SEGMENTS:-33}
     restart: unless-stopped
 
   mon-${i}:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.monitor
-    ports:
+    image: site-monitor-monitor:local
+${monBuild}    ports:
       - "\${FLEET_BIND:-127.0.0.1}:${novncPort}:6080"
     environment:
       NTFY_SERVER: \${NTFY_SERVER:-https://ntfy.sh}
@@ -79,6 +82,7 @@ for (let i = 1; i <= COUNT; i++) {
 }
 
 yml += `  dashboard:
+    image: site-monitor-dashboard:local
     build: ./dashboard
     ports:
       # 7300 outside: macOS AirPlay Receiver squats on 7000 (host side).
