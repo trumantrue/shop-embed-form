@@ -51,6 +51,7 @@ const PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
  .fill{background:#35be86;height:100%;}
  .form .fill{background:#7a5b16;} .form{outline:1px solid #7a5b16;}
  .unreachable{outline:1px solid #7a2727;} .unreachable .h{color:#e88;}
+ .takeover{outline:2px solid #2d6f9f;} .takeover .h{color:#7db8e8;}
  .ctl{display:flex;gap:.3rem;margin-top:.4rem;}
  .ctl a,.ctl button{font-size:.6rem;padding:.15rem .35rem;border-radius:4px;background:#3a3a3c;color:#ccc;border:0;text-decoration:none;cursor:pointer;}
  .topbar{display:flex;justify-content:space-between;align-items:center;}
@@ -70,8 +71,15 @@ async function takeover(id,btn){
   try{
     const r=await fetch('/api/takeover/'+id,{method:'POST'});
     if(!r.ok){alert('Takeover failed');return;}
+    const j=await r.json();
     window.open(CFG.takeoverVnc,'_blank');
+    console.log('takeover #'+id+' adopted '+j.adoptedCookies+' cookie(s) from the monitor session');
   }finally{btn.disabled=false;btn.textContent=t;}
+}
+async function release(id,btn){
+  btn.disabled=true;btn.textContent='…';
+  try{await fetch('/api/release/'+id,{method:'POST'});await refresh();}
+  finally{btn.disabled=false;}
 }
 async function refresh(){
  let d; try{ d=await (await fetch('/api/status',{cache:'no-store'})).json(); }catch(e){ return; }
@@ -93,11 +101,14 @@ async function refresh(){
    ranked.slice(0,5).map(r=>'#'+r.id+' '+Math.round(r.p*100)+'%').join(' · ');
  document.getElementById('grid').innerHTML=xs.map(function(x){
    const p=x.state==='form'?1:(x.progress||0);
-   const cls='cell'+(x.state==='form'?' form':'')+(x.state==='unreachable'?' unreachable':'');
+   const cls='cell'+(x.state==='form'?' form':'')+(x.state==='unreachable'?' unreachable':'')+(x.state==='takeover'?' takeover':'');
    return '<div class="'+cls+'"><div class="h"><span>#'+x.id+' V'+x.variant+'</span><span class="m">'+(x.method||x.state||'')+'</span></div>'+
      '<div class="bar"><div class="fill" style="width:'+Math.round(p*100)+'%"></div></div>'+
      '<div class="ctl">'+
-       (CFG.takeover?'<button onclick="takeover('+x.id+',this)" title="VNC into this instance">VNC</button>':'')+
+       (CFG.takeover?(x.state==='takeover'
+          ? '<button onclick="release('+x.id+',this)" title="hand the session back to the monitor" style="background:#7a5b16;color:#fff">Release</button>'
+          : '<button onclick="takeover('+x.id+',this)" title="VNC into this instance, sharing its monitored session">VNC</button>')
+        :'')+
        '<button onclick="resetOne('+x.id+',this)">Reset</button>'+
        '<a href="/api/page/'+x.id+'" target="_blank">Open</a>'+
        '<a href="/api/submissions/'+x.id+'" target="_blank">Subs</a>'+
@@ -129,14 +140,36 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({ takeover: !!(TAKEOVER_CTRL && TAKEOVER_VNC), takeoverVnc: TAKEOVER_VNC }));
   }
-  // Point the shared takeover browser at instance :id, then the client opens
-  // the noVNC URL. One slot: re-pointing supersedes the previous target.
+  // Takeover: (1) pause monitoring of :id and export its session from the
+  // watcher, (2) have the takeover browser adopt that session and navigate.
+  // The human then drives the SAME session the monitor established.
   if (req.method === 'POST' && (m = req.url.match(/^\/api\/takeover\/(\d+)$/))) {
     if (!TAKEOVER_CTRL) { res.writeHead(503); return res.end('takeover not configured'); }
+    const id = m[1];
     try {
-      const r = await fetch(`${TAKEOVER_CTRL}/goto?url=${encodeURIComponent(`${SITE}/q/${m[1]}`)}`, { method: 'POST', signal: AbortSignal.timeout(25000) });
-      const body = await r.text();
-      res.writeHead(r.status, { 'Content-Type': 'application/json' }); return res.end(body);
+      const t = await (await fetch(`${MW}/takeover/${id}`, { method: 'POST', signal: AbortSignal.timeout(15000) })).json();
+      const r = await fetch(`${TAKEOVER_CTRL}/adopt`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: t.url || `${SITE}/q/${id}`, storageState: t.storageState || null }),
+        signal: AbortSignal.timeout(25000),
+      });
+      const body = await r.json();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: !!body.ok, id: +id, current: body.current, adoptedCookies: (t.storageState && t.storageState.cookies ? t.storageState.cookies.length : 0) }));
+    } catch (e) { res.writeHead(502, { 'Content-Type': 'text/plain' }); return res.end(String(e.message)); }
+  }
+  // Release: pull the human's final session out of the takeover browser and
+  // hand it back to the watcher, which resumes monitoring with it.
+  if (req.method === 'POST' && (m = req.url.match(/^\/api\/release\/(\d+)$/))) {
+    if (!TAKEOVER_CTRL) { res.writeHead(503); return res.end('takeover not configured'); }
+    const id = m[1];
+    try {
+      const rel = await (await fetch(`${TAKEOVER_CTRL}/release`, { method: 'POST', signal: AbortSignal.timeout(15000) })).json();
+      await fetch(`${MW}/release/${id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storageState: rel.storageState || null }), signal: AbortSignal.timeout(15000),
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: true, id: +id }));
     } catch (e) { res.writeHead(502, { 'Content-Type': 'text/plain' }); return res.end(String(e.message)); }
   }
   if (req.url === '/healthz') { res.writeHead(200); return res.end('ok'); }

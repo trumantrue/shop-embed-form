@@ -28,6 +28,10 @@ function arm(id) {
   q.startPosition = Math.floor(Math.random() * QUEUE_SIZE) + 1;
   q.startAt = Date.now();
   q.admitLogged = false;
+  // A per-instance queue token — stands in for the session/cookie a real
+  // waiting-room issues. It must survive a takeover (monitor -> human) or the
+  // site would treat the takeover as a different visitor and lose the place.
+  if (!q.token) q.token = `${id}-${require('crypto').randomBytes(6).toString('hex')}`;
   inst.set(id, q);
   return q;
 }
@@ -117,6 +121,8 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (m = url.match(/^\/q\/(\d+)\/?$/))) {
     const id = +m[1]; if (id < 1 || id > COUNT) return send(404, 'no such instance', 'text/plain');
     const q = get(id);
+    // Issue the queue-token cookie (the session a takeover must inherit).
+    res.setHeader('Set-Cookie', `qtoken=${q.token}; Path=/; SameSite=Lax`);
     return send(200, stateOf(q, id) === 'form' ? formPage(id) : queuePage(id));
   }
   if (req.method === 'GET' && url === '/status') {
