@@ -92,9 +92,17 @@ const server = http.createServer((req, res) => {
       submissions: q.submissions.length,
     }), 'application/json');
   }
+  if (req.method === 'POST' && url === '/reset-all') {
+    for (let id = 1; id <= COUNT; id++) arm(id);
+    return send(200, JSON.stringify({ ok: true, reset: COUNT }), 'application/json');
+  }
   if (req.method === 'POST' && (m = url.match(/^\/q\/(\d+)\/reset$/))) {
     const id = +m[1]; const q = arm(id);
     return send(200, JSON.stringify({ ok: true, id, startPosition: q.startPosition }), 'application/json');
+  }
+  if (req.method === 'GET' && (m = url.match(/^\/q\/(\d+)\/submissions$/))) {
+    const id = +m[1]; const q = get(id);
+    return send(200, JSON.stringify(q.submissions, null, 2), 'application/json');
   }
   if (req.method === 'POST' && (m = url.match(/^\/q\/(\d+)\/submit$/))) {
     const id = +m[1]; const q = get(id); let raw = '';

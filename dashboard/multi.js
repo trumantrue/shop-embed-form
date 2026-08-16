@@ -8,6 +8,7 @@
 const http = require('http');
 const PORT = parseInt(process.env.PORT || '7000', 10);
 const MW = (process.env.MULTI_WATCHER || 'http://localhost:7100').replace(/\/+$/, '');
+const SITE = (process.env.MULTI_SITE || 'http://localhost:8080').replace(/\/+$/, '');
 
 async function fetchStatus() {
   try {
@@ -15,6 +16,20 @@ async function fetchStatus() {
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
+}
+
+// Proxy a request through to the multi-queue site (reset / submissions /
+// the actual queue page). The dashboard is the only tailnet-exposed service,
+// so it fronts the site's controls the way 7300 fronts the fleet's.
+async function proxySite(pathAndMethod, res, contentType) {
+  try {
+    const r = await fetch(`${SITE}${pathAndMethod.path}`, { method: pathAndMethod.method, signal: AbortSignal.timeout(5000) });
+    const body = await r.text();
+    res.writeHead(r.status, { 'Content-Type': contentType || r.headers.get('content-type') || 'text/plain', 'Cache-Control': 'no-store' });
+    res.end(body);
+  } catch (e) {
+    res.writeHead(502, { 'Content-Type': 'text/plain' }); res.end(String(e.message));
+  }
 }
 
 const PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -34,8 +49,13 @@ const PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
  .fill{background:#35be86;height:100%;}
  .form .fill{background:#7a5b16;} .form{outline:1px solid #7a5b16;}
  .unreachable{outline:1px solid #7a2727;} .unreachable .h{color:#e88;}
+ .ctl{display:flex;gap:.3rem;margin-top:.4rem;}
+ .ctl a,.ctl button{font-size:.6rem;padding:.15rem .35rem;border-radius:4px;background:#3a3a3c;color:#ccc;border:0;text-decoration:none;cursor:pointer;}
+ .topbar{display:flex;justify-content:space-between;align-items:center;}
+ button.reset-all{font-size:.8rem;padding:.45rem .9rem;border-radius:7px;border:0;background:#7a2727;color:#fff;cursor:pointer;}
 </style></head><body>
-<h1>Monitor fleet — scale mode</h1>
+<div class="topbar"><h1>Monitor fleet — scale mode</h1>
+  <button class="reset-all" onclick="resetAll(this)">Reset all</button></div>
 <div class="sum" id="sum">loading…</div>
 <div class="lead" id="lead"></div>
 <div id="grid"></div>
@@ -62,9 +82,20 @@ async function refresh(){
    const p=x.state==='form'?1:(x.progress||0);
    const cls='cell'+(x.state==='form'?' form':'')+(x.state==='unreachable'?' unreachable':'');
    return '<div class="'+cls+'"><div class="h"><span>#'+x.id+' V'+x.variant+'</span><span class="m">'+(x.method||x.state||'')+'</span></div>'+
-     '<div class="bar"><div class="fill" style="width:'+Math.round(p*100)+'%"></div></div></div>';
+     '<div class="bar"><div class="fill" style="width:'+Math.round(p*100)+'%"></div></div>'+
+     '<div class="ctl">'+
+       '<button onclick="resetOne('+x.id+',this)">Reset</button>'+
+       '<a href="/api/page/'+x.id+'" target="_blank">Open</a>'+
+       '<a href="/api/submissions/'+x.id+'" target="_blank">Subs</a>'+
+     '</div></div>';
  }).join('');
 }
+async function resetAll(btn){
+  if(!confirm('Reset ALL instances? Every queue restarts at a new random position.'))return;
+  btn.disabled=true;btn.textContent='Resetting…';
+  try{await fetch('/api/reset-all',{method:'POST'});await refresh();}finally{btn.disabled=false;btn.textContent='Reset all';}
+}
+async function resetOne(id,btn){btn.disabled=true;try{await fetch('/api/reset/'+id,{method:'POST'});await refresh();}finally{btn.disabled=false;}}
 refresh(); setInterval(refresh,5000);
 </script></body></html>`;
 
@@ -75,6 +106,11 @@ http.createServer(async (req, res) => {
     res.writeHead(s ? 200 : 502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify(s || { error: 'multi-watcher unreachable' }));
   }
+  let m;
+  if (req.method === 'POST' && req.url === '/api/reset-all') return proxySite({ path: '/reset-all', method: 'POST' }, res, 'application/json');
+  if (req.method === 'POST' && (m = req.url.match(/^\/api\/reset\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}/reset`, method: 'POST' }, res, 'application/json');
+  if (req.method === 'GET' && (m = req.url.match(/^\/api\/submissions\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}/submissions`, method: 'GET' }, res, 'application/json');
+  if (req.method === 'GET' && (m = req.url.match(/^\/api\/page\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}`, method: 'GET' }, res, 'text/html; charset=utf-8');
   if (req.url === '/healthz') { res.writeHead(200); return res.end('ok'); }
   res.writeHead(404); res.end('not found');
 }).listen(PORT, () => console.log(`[multi-dashboard] :${PORT} -> ${MW}`));

@@ -42,6 +42,7 @@ services:
     command: ["node", "multi.js"]
     environment:
       MULTI_WATCHER: http://scale-mon:7100
+      MULTI_SITE: http://scale-site:8080
       PORT: "7000"
     ports:
       - "${FLEET_BIND:-127.0.0.1}:${SCALE_DASH_PORT:-7400}:7000"
