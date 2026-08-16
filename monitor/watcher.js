@@ -27,6 +27,7 @@ const { chromium } = require('playwright');
 const { PNG } = require('pngjs');
 const pixelmatch = require('pixelmatch');
 const ntfy = require('./lib/ntfy');
+const { detectProgress } = require('./lib/detect');
 
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -97,7 +98,7 @@ function ts() {
 // read off the rendered page (screen truth), not what the site claims.
 const status = {
   label: null, url: null, state: 'starting',
-  progress: null, progressSegments: null,
+  progress: null, progressMethod: null,
   checks: 0, lastCheckAt: null, lastChangeAt: null,
   pixelDiffPct: null, textChanged: null,
 };
@@ -213,42 +214,25 @@ async function main() {
 
     await page.waitForTimeout(500); // small settle for late paints
 
+    // Detect progress GENERICALLY first — no per-page selector. This also tags
+    // the bar element with data-mon-bar so we can mask exactly that region.
+    const detected = await page.evaluate(detectProgress).catch(() => null);
+    status.progress = detected ? Number(detected.progress.toFixed(4)) : null;
+    status.progressMethod = detected ? detected.method : null;
+
     // Two screenshots per check with different jobs:
-    //   shot     — the REAL page (thumbnail, alerts, saved before/after). Shows
-    //              the progress bar as it actually is.
-    //   diffShot — dynamic regions (the bar) masked with a constant color, so
-    //              their movement can never trip the pixel diff. Used ONLY for
-    //              the comparison, never displayed.
-    // With no maskSelectors the two are identical and we skip the extra capture.
-    const mask = (cfg.maskSelectors || []).map((s) => page.locator(s));
+    //   shot     — the REAL page (thumbnail, alerts, saved before/after).
+    //   diffShot — the detected bar region masked with a constant color, so its
+    //              movement can never trip the pixel diff. Used ONLY for the
+    //              comparison. With no bar detected the two are identical.
     const shot = await page.screenshot({ type: 'png' });
-    const diffShot = mask.length
-      ? await page.screenshot({ type: 'png', mask, maskColor: '#3f3f3f' })
+    const diffShot = detected
+      ? await page.screenshot({ type: 'png', mask: [page.locator('[data-mon-bar]')], maskColor: '#3f3f3f' })
       : shot;
     latestShot = shot;
     const text = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
     const textHash = sha256(text);
 
-    // Progress telemetry, read off the rendered page itself.
-    if (cfg.progressSelector) {
-      const p = await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (!el) return null;
-        // The queue bar is a reveal: all segments are always present and a
-        // mask covers the un-reached ones. Progress is the data-progress
-        // attribute; "revealed" segments are derived from it for display.
-        const attr = parseFloat(el.getAttribute('data-progress'));
-        const total = el.querySelectorAll('.qbar-seg, .seg').length;
-        const prog = isNaN(attr) ? null : attr;
-        const revealed = prog !== null ? Math.round(prog * total) : 0;
-        return { attr: prog, revealed, total };
-      }, cfg.progressSelector).catch(() => null);
-      status.progress = p ? p.attr : null;
-      status.progressSegments = p && p.total ? `${p.revealed}/${p.total}` : null;
-    } else {
-      status.progress = null;
-      status.progressSegments = null;
-    }
     status.state = 'ok';
     status.checks += 1;
     status.lastCheckAt = new Date().toISOString();
@@ -266,7 +250,7 @@ async function main() {
     status.pixelDiffPct = Number((pixFrac * 100).toFixed(2));
     status.textChanged = textChanged;
     console.log(`[watcher] check: pixelDiff=${(pixFrac * 100).toFixed(2)}% textChanged=${textChanged} ` +
-      `progress=${status.progress === null ? '-' : status.progress} ` +
+      `progress=${status.progress === null ? '-' : status.progress}${status.progressMethod ? `(${status.progressMethod})` : ''} ` +
       `pending=${changed ? pendingChange + 1 : 0}/${cfg.confirmChecks}`);
 
     if (!changed) {

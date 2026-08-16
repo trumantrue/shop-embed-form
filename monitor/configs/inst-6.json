@@ -5,9 +5,5 @@
   "pixelThreshold": 0.02,
   "confirmChecks": 2,
   "blockAssets": false,
-  "country": null,
-  "progressSelector": ".qbar",
-  "maskSelectors": [
-    ".qbar"
-  ]
+  "country": null
 }

@@ -27,6 +27,8 @@ for (let i = 1; i <= COUNT; i++) {
   const label = `inst-${i}`;
   const novncPort = 6080 + (i - 1);
 
+  // Progress is detected generically (ARIA / structural geometry, no selector),
+  // so no per-page selector config is needed.
   fs.writeFileSync(path.join(cfgDir, `${label}.json`), JSON.stringify({
     label,
     url: `http://site-${i}:8080`,
@@ -35,9 +37,11 @@ for (let i = 1; i <= COUNT; i++) {
     confirmChecks: 2,
     blockAssets: false,
     country: null,
-    progressSelector: '.qbar',
-    maskSelectors: ['.qbar'],
   }, null, 2) + '\n');
+
+  // Rotate the 5 layout variants across instances so the live fleet is itself
+  // a mixed-variant blind test of the generic detector.
+  const variant = ((i - 1) % 5) + 1;
 
   // Only the first site/monitor service carries a build: stanza; the rest
   // reference the same image. 10 concurrent duplicate builds of the Chromium
@@ -48,6 +52,7 @@ for (let i = 1; i <= COUNT; i++) {
     image: site-monitor-testsite:local
 ${siteBuild}    environment:
       QUEUE_SIZE: \${QUEUE_SIZE:-1000}
+      VARIANT: "${variant}"
     restart: unless-stopped
 
   mon-${i}:

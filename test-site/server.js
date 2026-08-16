@@ -28,9 +28,11 @@
 
 const http = require('http');
 const { URLSearchParams } = require('url');
+const { renderVariant, variantIds } = require('./variants');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const QUEUE_SIZE = parseInt(process.env.QUEUE_SIZE || '1000', 10);
+const VARIANT = parseInt(process.env.VARIANT || '1', 10); // which layout this instance serves
 
 let startPosition = 0;
 let startAt = 0;
@@ -88,45 +90,7 @@ function pageShell(body) {
                     border: 1px solid #bbb; border-radius: 4px; font-size: 1rem; }
   button { margin-top: 1.25rem; padding: 0.6rem 1.5rem; font-size: 1rem;
            background: #35be86; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
-
-  /* Queue bar — handover §7 (rev. 2). Track, border and mask share #4d4d4d so
-     the mask is seamless. Segment is 24 tall in a 24 channel with 2px vertical
-     margins; its 28px margin-box is clipped by overflow:hidden, so segments
-     meet the border top and bottom with no vertical gap. */
-  .qbar {
-    position: relative;
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    height: 32px;
-    width: 100%;
-    margin: 32px 0;
-    overflow: hidden;
-    border: 4px solid #4d4d4d;
-    background: #4d4d4d;
-    box-sizing: border-box;
-  }
-  .qbar-seg {
-    margin: 2px;
-    height: 24px;
-    width: 16px;
-    background: #35be86;
-    /* NO flex rule. Default flex-shrink:1 is load-bearing: more segments are
-       created than fit at 16px, and flexbox shrinks them to fill the channel
-       exactly (~13.8px at a 896px track). Pinning them (flex:none) overflows
-       the channel and renders a visibly different bar — see §3. */
-  }
-  .qbar-mask {
-    position: absolute;
-    right: 0;
-    top: 0;
-    height: 100%;
-    background: #4d4d4d;
-    transition: width 1000ms linear;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .qbar-mask { transition: none; }
-  }
+  /* The queue bar's own styles are injected per-variant (see variants.js). */
 </style>
 </head>
 <body>
@@ -137,69 +101,12 @@ ${body}
 </html>`;
 }
 
-function queuePage() {
-  const position = positionNow();
-  const progress = progressFrom(position);
-  const maskWidth = ((1 - progress) * 100).toFixed(2);
+function queuePage(variantId) {
   // Server-render the mask at its true width (handover gotcha 1 & 3): no
   // one-second sweep-up on load, and the bar is meaningful before hydration.
-  return pageShell(`
-  <h1>You're in the queue</h1>
-  <p>Please wait — you'll be admitted automatically when it's your turn.
-     When you reach the front, this page becomes a data-input form and the
-     monitor watching it should raise an alert.</p>
-  <div class="qbar" role="progressbar" aria-label="Queue position"
-       aria-valuemin="0" aria-valuemax="100" aria-valuenow="${(progress * 100).toFixed(0)}"
-       data-progress="${progress.toFixed(4)}">
-    <div class="qbar-mask" style="width:${maskWidth}%"></div>
-  </div>
-<script>
-  const DIVISOR = 18; // ~= the pitch that results once segments shrink (§3, §8)
-  const bar = document.querySelector('.qbar');
-  const mask = bar.querySelector('.qbar-mask');
-
-  function fillSegments() {
-    bar.querySelectorAll('.qbar-seg').forEach((el) => el.remove());
-    const width = bar.offsetWidth;
-    if (!width) return;
-    // Deliberately more segments than fit at their nominal 16px; flex-shrink
-    // sizes them to fill the channel exactly. Do not "fix" this — see §3.
-    const count = Math.floor(width / DIVISOR) + 1;
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i < count; i++) {
-      const seg = document.createElement('div');
-      seg.className = 'qbar-seg';
-      frag.appendChild(seg);
-    }
-    bar.insertBefore(frag, mask);
-  }
-
-  function render(progress) {
-    mask.style.width = ((1 - progress) * 100) + '%';
-    bar.setAttribute('data-progress', progress.toFixed(4));
-    bar.setAttribute('aria-valuenow', (progress * 100).toFixed(0));
-  }
-
-  async function tick() {
-    try {
-      const s = await (await fetch('/status', { cache: 'no-store' })).json();
-      if (s.state === 'form') { location.reload(); return; }
-      render(s.progress);
-    } catch (e) { /* transient; try again next tick */ }
-  }
-
-  fillSegments();
-  // Poll at the tick interval; transition duration matches (1000ms) so the
-  // mask retracts continuously rather than in visible steps.
-  setInterval(tick, 1000);
-
-  let rt;
-  window.addEventListener('resize', () => {
-    clearTimeout(rt);
-    rt = setTimeout(fillSegments, 150);
-  });
-</script>
-`);
+  const progress = progressFrom(positionNow());
+  const v = renderVariant(variantId, progress);
+  return pageShell(`<style>${v.css}</style>\n${v.body}`);
 }
 
 const formPage = pageShell(`
@@ -224,8 +131,12 @@ const server = http.createServer((req, res) => {
     res.end(body);
   };
 
-  if (req.method === 'GET' && req.url === '/') {
-    return send(200, stateNow() === 'form' ? formPage : queuePage());
+  if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
+    // ?variant=N overrides the VARIANT env, so one running server can serve
+    // every layout for local blind testing without restarts.
+    const q = new URLSearchParams(req.url.split('?')[1] || '');
+    const variant = parseInt(q.get('variant') || VARIANT, 10);
+    return send(200, stateNow() === 'form' ? formPage : queuePage(variant));
   }
 
   if (req.method === 'POST' && req.url === '/submit') {
