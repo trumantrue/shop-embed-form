@@ -112,6 +112,19 @@ reusing the fleet images, runs ALONGSIDE the headful fleet:
   (persisted by tailscaled; re-run only if serve config is reset). VNC password
   is the `.env` `VNC_PASSWORD`. Verified: click VNC → drive instance 42's form
   over the tailnet.
+- **Shared monitored session (for real sites).** The takeover continues the
+  SAME session the monitor established (queue token, login, cart), and each of
+  the 100 is monitored in its OWN persistent context (isolated cookies — no
+  bleed between distinct real sites). Flow: VNC button → watcher POST
+  /takeover/:id pauses that instance (pool skips it, state `takeover`) and
+  exports its storageState → takeover POST /adopt recreates its context from
+  that session and navigates. Release button → takeover POST /release returns
+  the human's final storageState → watcher POST /release/:id adopts it into a
+  fresh context and resumes. Memory ~435 MB for 100 contexts / pool 4 (idle
+  contexts are cheap). Verified end-to-end: instance 7's own qtoken cookie
+  carried monitor→takeover (adoptedCookies:1), isolation confirmed, release
+  resumed. NB: shares the persistent SESSION (cookies/storage), not live
+  in-memory JS state.
 
 ## 1. MacBook-only smoke test (no Docker, no proxy) — verified
 
