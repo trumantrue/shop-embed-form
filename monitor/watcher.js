@@ -213,10 +213,18 @@ async function main() {
 
     await page.waitForTimeout(500); // small settle for late paints
 
-    // Mask legitimately-dynamic regions (e.g. the progress bar) with a
-    // constant color so their movement can never trip the pixel diff.
+    // Two screenshots per check with different jobs:
+    //   shot     — the REAL page (thumbnail, alerts, saved before/after). Shows
+    //              the progress bar as it actually is.
+    //   diffShot — dynamic regions (the bar) masked with a constant color, so
+    //              their movement can never trip the pixel diff. Used ONLY for
+    //              the comparison, never displayed.
+    // With no maskSelectors the two are identical and we skip the extra capture.
     const mask = (cfg.maskSelectors || []).map((s) => page.locator(s));
-    const shot = await page.screenshot({ type: 'png', mask, maskColor: '#3f3f3f' });
+    const shot = await page.screenshot({ type: 'png' });
+    const diffShot = mask.length
+      ? await page.screenshot({ type: 'png', mask, maskColor: '#3f3f3f' })
+      : shot;
     latestShot = shot;
     const text = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
     const textHash = sha256(text);
@@ -244,13 +252,13 @@ async function main() {
     status.lastCheckAt = new Date().toISOString();
 
     if (!baseline) {
-      baseline = { shot, textHash, url: cfg.url };
+      baseline = { shot, diffShot, textHash, url: cfg.url };
       fs.writeFileSync(path.join(DATA_DIR, 'baseline.png'), shot);
       console.log(`[watcher] baseline captured (${text.length} chars of text)`);
       return;
     }
 
-    const pixFrac = pixelDiffFraction(baseline.shot, shot);
+    const pixFrac = pixelDiffFraction(baseline.diffShot, diffShot);
     const textChanged = textHash !== baseline.textHash;
     const changed = textChanged || pixFrac > cfg.pixelThreshold;
     status.pixelDiffPct = Number((pixFrac * 100).toFixed(2));
@@ -281,7 +289,7 @@ async function main() {
       shot,
     });
 
-    baseline = { shot, textHash, url: cfg.url };
+    baseline = { shot, diffShot, textHash, url: cfg.url };
     pendingChange = 0;
   }
 
