@@ -61,7 +61,7 @@ ${monBuild}    ports:
       NTFY_TOPIC: \${NTFY_TOPIC:-}
       NTFY_TOKEN: \${NTFY_TOKEN:-}
       VNC_PASSWORD: \${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://\${MINI_HOST:-localhost}:${novncPort}/vnc.html
+      LIVE_VIEW_URL: http://\${MINI_HOST:-localhost}:${novncPort}/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/${label}.json:/app/config.json:ro

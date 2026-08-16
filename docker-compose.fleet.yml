@@ -21,7 +21,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6080/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6080/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-1.json:/app/config.json:ro
@@ -48,7 +48,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6081/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6081/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-2.json:/app/config.json:ro
@@ -75,7 +75,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6082/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6082/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-3.json:/app/config.json:ro
@@ -102,7 +102,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6083/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6083/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-4.json:/app/config.json:ro
@@ -129,7 +129,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6084/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6084/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-5.json:/app/config.json:ro
@@ -156,7 +156,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6085/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6085/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-6.json:/app/config.json:ro
@@ -183,7 +183,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6086/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6086/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-7.json:/app/config.json:ro
@@ -210,7 +210,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6087/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6087/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-8.json:/app/config.json:ro
@@ -237,7 +237,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6088/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6088/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-9.json:/app/config.json:ro
@@ -264,7 +264,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6089/vnc.html
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:6089/vnc.html?autoconnect=1&resize=scale&quality=3
       STATUS_PORT: "7100"
     volumes:
       - ./monitor/configs/inst-10.json:/app/config.json:ro

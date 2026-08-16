@@ -109,13 +109,31 @@ const PAGE = `<!DOCTYPE html>
     background: #3a3a3c; color: #ddd; text-decoration: none; border: 0; cursor: pointer; }
   a.btn.primary { background: #2d5f3f; color: #fff; }
   img.thumb { width: 100%; border-radius: 6px; margin-top: 0.55rem; border: 1px solid #3a3a3c; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  button.reset-all { font-size: 0.8rem; padding: 0.45rem 0.9rem; border-radius: 7px; border: 0;
+    background: #7a2727; color: #fff; cursor: pointer; }
+  button.reset-all:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
-<h1>Monitor fleet</h1>
+<div class="topbar">
+  <h1>Monitor fleet</h1>
+  <button class="reset-all" onclick="resetAll(this)">Reset all</button>
+</div>
 <div id="grid">loading…</div>
 <script>
 const SEGS = 33;
+// noVNC params for a usable mobile session: auto-connect (skip the dialog),
+// scale the remote desktop to fit the screen instead of pan-and-zoom, and
+// lower the encoding quality to cut bandwidth on a phone connection.
+const VNC_PARAMS = 'autoconnect=1&resize=scale&quality=3';
+function vncUrl(u) { return u + (u.includes('?') ? '&' : '?') + VNC_PARAMS; }
+async function resetAll(btn) {
+  if (!confirm('Reset ALL instances? Every bar restarts from 0% with a new random rate.')) return;
+  btn.disabled = true; btn.textContent = 'Resetting…';
+  try { await fetch('/api/reset-all', { method: 'POST' }); await refresh(); }
+  finally { btn.disabled = false; btn.textContent = 'Reset all'; }
+}
 function bar(p) {
   let h = '<div class="track"><div class="segs">';
   const filled = Math.round((p || 0) * SEGS);
@@ -142,7 +160,7 @@ function card(i) {
       'checks: ' + (w ? w.checks : '—') +
       ' · last change: ' + (w && w.lastChangeAt ? new Date(w.lastChangeAt).toLocaleTimeString() : 'none') + '</div>' +
     '<div class="row">' +
-      '<a class="btn primary" href="' + i.novnc + '" target="_blank">Open browser</a>' +
+      '<a class="btn primary" href="' + vncUrl(i.novnc) + '" target="_blank">Open browser</a>' +
       '<button class="btn" onclick="fetch(\\'/api/reset/' + i.label + '\\',{method:\\'POST\\'}).then(refresh)">Reset</button>' +
       '<a class="btn" href="/api/submissions/' + i.label + '" target="_blank">Submissions</a>' +
     '</div>' +
@@ -174,6 +192,16 @@ http.createServer(async (req, res) => {
   }
   let m;
   if (req.method === 'GET' && (m = url.match(/^\/api\/shot\/([\w-]+)$/))) return proxyShot(m[1], res);
+  if (req.method === 'POST' && url === '/api/reset-all') {
+    const results = await Promise.all(FLEET.map(async (inst) => {
+      try {
+        const r = await fetch(`${inst.site}/reset`, { method: 'POST', signal: AbortSignal.timeout(4000) });
+        return { label: inst.label, ok: r.ok };
+      } catch { return { label: inst.label, ok: false }; }
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ reset: results.filter((x) => x.ok).length, total: results.length, results }));
+  }
   if (req.method === 'POST' && (m = url.match(/^\/api\/reset\/([\w-]+)$/))) return siteAction(m[1], '/reset', 'POST', res);
   if (req.method === 'GET' && (m = url.match(/^\/api\/submissions\/([\w-]+)$/))) return siteAction(m[1], '/submissions', 'GET', res);
   if (req.method === 'GET' && url === '/healthz') { res.writeHead(200); return res.end('ok'); }
