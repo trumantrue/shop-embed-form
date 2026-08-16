@@ -126,12 +126,27 @@ const PAGE = `<!DOCTYPE html>
 <body>
 <div class="topbar">
   <h1>Monitor fleet</h1>
-  <button class="reset-all" onclick="resetAll(this)">Reset all</button>
+  <span>
+    <button class="reset-all" id="thumbToggle" onclick="toggleThumbs()" style="background:#3a3a3c;margin-right:.5rem;"></button>
+    <button class="reset-all" onclick="resetAll(this)">Reset all</button>
+  </span>
 </div>
 <div class="leader" id="leader"></div>
 <div id="grid">loading…</div>
 <script>
 const SEGS = 33;
+// Live-preview thumbnails are OFF by default; the toggle re-enables them and
+// the choice persists. When off, the shot images are neither rendered nor
+// fetched, so no screenshots cross the wire.
+let SHOW_THUMBS = localStorage.getItem('showThumbs') === '1';
+function paintToggle() {
+  document.getElementById('thumbToggle').textContent = SHOW_THUMBS ? 'Hide previews' : 'Show previews';
+}
+function toggleThumbs() {
+  SHOW_THUMBS = !SHOW_THUMBS;
+  localStorage.setItem('showThumbs', SHOW_THUMBS ? '1' : '0');
+  paintToggle(); refresh();
+}
 // noVNC params for a usable mobile session: auto-connect (skip the dialog),
 // scale the remote desktop to fit the screen instead of pan-and-zoom, and
 // lower the encoding quality to cut bandwidth on a phone connection.
@@ -173,7 +188,7 @@ function card(i) {
       '<button class="btn" onclick="fetch(\\'/api/reset/' + i.label + '\\',{method:\\'POST\\'}).then(refresh)">Reset</button>' +
       '<a class="btn" href="/api/submissions/' + i.label + '" target="_blank">Submissions</a>' +
     '</div>' +
-    '<img class="thumb" src="/api/shot/' + i.label + '?t=' + Date.now() + '" onerror="this.style.display=\\'none\\'">' +
+    (SHOW_THUMBS ? '<img class="thumb" src="/api/shot/' + i.label + '?t=' + Date.now() + '" onerror="this.style.display=\\'none\\'">' : '') +
   '</div>';
 }
 function progressOf(i) {
@@ -205,6 +220,7 @@ async function refresh() {
     document.getElementById('grid').innerHTML = fleet.map(card).join('');
   } catch (e) { /* retry next tick */ }
 }
+paintToggle();
 refresh();
 setInterval(refresh, 5000);
 </script>
