@@ -17,8 +17,10 @@
 //   CHROME_PATH     explicit Chromium binary (else Playwright's own resolution)
 //   HEADLESS=1      run headless (local testing without a display)
 //   CONFIG_PATH     alternative config file (default ./config.json)
+//   STATUS_PORT     serve /status.json + /shot.png for the fleet dashboard (0/unset = off)
 
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 const { chromium } = require('playwright');
@@ -41,6 +43,14 @@ const DEFAULTS = {
   country: null,            // two-letter code for Bright Data geo, e.g. "de"
   viewport: { width: 1280, height: 900 },
   navTimeoutMs: 45000,
+  // Read a 0..1 progress value off the rendered page: the selected element's
+  // data-progress attribute, cross-checked against its filled .seg count.
+  // null = no progress tracking.
+  progressSelector: null,
+  // Selectors masked out of screenshots before the pixel diff — for regions
+  // that legitimately change without meaning "the content changed" (the
+  // progress bar, carousels, tickers). Masked areas can never trigger.
+  maskSelectors: [],
 };
 
 function loadConfig() {
@@ -83,10 +93,39 @@ function ts() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+// Live state served to the fleet dashboard. `progress` is what this watcher
+// read off the rendered page (screen truth), not what the site claims.
+const status = {
+  label: null, url: null, state: 'starting',
+  progress: null, progressSegments: null,
+  checks: 0, lastCheckAt: null, lastChangeAt: null,
+  pixelDiffPct: null, textChanged: null,
+};
+let latestShot = null;
+
+function startStatusServer() {
+  const port = parseInt(process.env.STATUS_PORT || '0', 10);
+  if (!port) return;
+  http.createServer((req, res) => {
+    if (req.url === '/status.json') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(status));
+    }
+    if (req.url === '/shot.png' && latestShot) {
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return res.end(latestShot);
+    }
+    res.writeHead(404); res.end('not found');
+  }).listen(port, () => console.log(`[watcher] status server on :${port}`));
+}
+
 async function main() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   let cfg = loadConfig();
   const proxy = proxySettings(cfg);
+  status.label = cfg.label;
+  status.url = cfg.url;
+  startStatusServer();
 
   console.log(`[watcher] label=${cfg.label} url=${cfg.url} interval=${cfg.checkIntervalSeconds}s ` +
     `proxy=${proxy ? `bright-data (country=${cfg.country || 'any'})` : 'DIRECT (no BRD_* env set)'} headless=${HEADLESS}`);
@@ -152,10 +191,14 @@ async function main() {
       pendingChange = 0;
     }
 
+    status.label = cfg.label;
+    status.url = cfg.url;
     try {
       await page.goto(cfg.url, { waitUntil: 'networkidle', timeout: cfg.navTimeoutMs });
     } catch (err) {
       console.error(`[watcher] navigation failed: ${err.message}`);
+      status.state = 'unreachable';
+      status.lastCheckAt = new Date().toISOString();
       if (!lastNavError) {
         lastNavError = true;
         await alert({ title: 'Site unreachable', message: `${cfg.url}\n${err.message.split('\n')[0]}` });
@@ -169,9 +212,36 @@ async function main() {
     }
 
     await page.waitForTimeout(500); // small settle for late paints
-    const shot = await page.screenshot({ type: 'png' });
+
+    // Mask legitimately-dynamic regions (e.g. the progress bar) with a
+    // constant color so their movement can never trip the pixel diff.
+    const mask = (cfg.maskSelectors || []).map((s) => page.locator(s));
+    const shot = await page.screenshot({ type: 'png', mask, maskColor: '#3f3f3f' });
+    latestShot = shot;
     const text = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
     const textHash = sha256(text);
+
+    // Progress telemetry, read off the rendered page itself.
+    if (cfg.progressSelector) {
+      const p = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const attr = parseFloat(el.getAttribute('data-progress'));
+        const total = parseInt(el.getAttribute('data-segments'), 10) || 0;
+        const segs = el.querySelectorAll('.seg');
+        let filled = 0;
+        for (const s of segs) if (s.style.background !== 'transparent') filled++;
+        return { attr: isNaN(attr) ? null : attr, filled, total };
+      }, cfg.progressSelector).catch(() => null);
+      status.progress = p ? p.attr : null;
+      status.progressSegments = p && p.total ? `${p.filled}/${p.total}` : null;
+    } else {
+      status.progress = null;
+      status.progressSegments = null;
+    }
+    status.state = 'ok';
+    status.checks += 1;
+    status.lastCheckAt = new Date().toISOString();
 
     if (!baseline) {
       baseline = { shot, textHash, url: cfg.url };
@@ -183,7 +253,10 @@ async function main() {
     const pixFrac = pixelDiffFraction(baseline.shot, shot);
     const textChanged = textHash !== baseline.textHash;
     const changed = textChanged || pixFrac > cfg.pixelThreshold;
+    status.pixelDiffPct = Number((pixFrac * 100).toFixed(2));
+    status.textChanged = textChanged;
     console.log(`[watcher] check: pixelDiff=${(pixFrac * 100).toFixed(2)}% textChanged=${textChanged} ` +
+      `progress=${status.progress === null ? '-' : status.progress} ` +
       `pending=${changed ? pendingChange + 1 : 0}/${cfg.confirmChecks}`);
 
     if (!changed) {
@@ -200,6 +273,7 @@ async function main() {
     fs.writeFileSync(afterPath, shot);
     console.log(`[watcher] CHANGE CONFIRMED — screenshots: ${beforePath} / ${afterPath}`);
 
+    status.lastChangeAt = new Date().toISOString();
     await alert({
       title: 'Content changed',
       message: `${cfg.url}\npixel diff ${(pixFrac * 100).toFixed(1)}%, text ${textChanged ? 'changed' : 'unchanged'}. ` +

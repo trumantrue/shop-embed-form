@@ -1,11 +1,13 @@
 {
-  "label": "test-1",
-  "url": "http://localhost:8080",
+  "label": "inst-9",
+  "url": "http://site-9:8080",
   "checkIntervalSeconds": 15,
   "pixelThreshold": 0.02,
   "confirmChecks": 2,
   "blockAssets": false,
   "country": null,
   "progressSelector": "#bar",
-  "maskSelectors": ["#bar-wrap"]
+  "maskSelectors": [
+    "#bar-wrap"
+  ]
 }
