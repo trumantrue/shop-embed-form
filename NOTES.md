@@ -22,11 +22,30 @@ mini just runs compose).
   link, **Reset** button (re-arms a completed instance remotely — instances
   are one-shot, so this is how you restart them from holiday), submissions
   view.
-- Mini deploy:
-  `cp .env.example .env` → set `NTFY_TOPIC`, `VNC_PASSWORD`,
-  `MINI_HOST=<magicdns-name>`, `FLEET_BIND=<tailscale-ip>` →
-  `docker compose -f docker-compose.fleet.yml up --build -d`.
-  Phone/MacBook: dashboard at `http://<magicdns>:7300`, noVNC 6080–6089.
+- **DEPLOYED on the mini 2026-08-16** (`stephens-mac-mini.tail39a0a0.ts.net`).
+  As-built specifics, which differ from the original plan:
+  - Docker = **Colima** (no Docker/OrbStack/brew existed; OrbStack needs GUI
+    clicks nobody was present to make). Binaries in `~/bin` (`colima`,
+    `docker`, `limactl` — shares the dir with ollama's files), lima dist in
+    `~/.lima-dist`, compose plugin in `~/.docker/cli-plugins`. VM: vz, 4 CPU,
+    6 GB RAM, **12 GB disk cap**. Start after a reboot:
+    `PATH=$HOME/bin:$PATH colima start` then
+    `cd ~/dev/site-monitor && docker compose -f docker-compose.fleet.yml up -d`
+    (colima does NOT autostart at login — known gap).
+  - **`FLEET_BIND` stays `127.0.0.1`**: colima's forwarder cannot bind the
+    host's Tailscale IP (`cannot assign requested address`). Tailnet exposure
+    is via `tailscale serve --bg --tcp <port> tcp://127.0.0.1:<port>` for
+    6080–6089 + 7300 (tailnet-only; Funnel NOT enabled for these — the mini's
+    existing Funnel paths `/` and `/bagreview` untouched).
+  - Dashboard: `http://stephens-mac-mini.tail39a0a0.ts.net:7300` ·
+    noVNC per instance on 6080–6089. Repo on the mini: `~/dev/site-monitor`
+    (`.env` there holds the VNC password).
+  - **⚠ Disk incident during first deploy:** 10 concurrent duplicate builds
+    of the Chromium image filled the 20 GB VM disk AND took the mini's host
+    disk to 100% (105 MB free). Recovered by deleting the VM
+    (`rm ~/.colima/_lima/_disks`). Root cause fixed in gen-fleet.js (one
+    `build:` per image, shared tags) and the VM disk capped at 12 GB so it
+    can never take that much again. Mini baseline: ~20 GB free, VM ~7 GB used.
 - Expect **10 "Monitor started" pushes** at deploy, and one "Content
   changed" push per instance as each bar completes.
 - Load estimate: 10 headful Chromiums + Xvfb ≈ 3–5 GB RAM on the mini.
