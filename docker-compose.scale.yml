@@ -37,15 +37,36 @@ services:
       - scale-site
     restart: unless-stopped
 
+  # One always-on headful browser + noVNC, re-pointable at any instance on
+  # demand (the promote-one-on-demand takeover for scale mode). Uses the
+  # monitor image's default entrypoint (start.sh) with TAKEOVER=1, so it gets
+  # the Xvfb + x11vnc + noVNC plumbing. noVNC published on TAKEOVER_PORT.
+  scale-takeover:
+    image: site-monitor-monitor:local
+    environment:
+      TAKEOVER: "1"
+      TAKEOVER_URL: http://scale-site:8080/q/1
+      TAKEOVER_CONTROL_PORT: "7300"
+      VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
+    ports:
+      - "${FLEET_BIND:-127.0.0.1}:${TAKEOVER_PORT:-7500}:6080"
+    shm_size: 1gb
+    depends_on:
+      - scale-site
+    restart: unless-stopped
+
   scale-dash:
     image: site-monitor-dashboard:local
     command: ["node", "multi.js"]
     environment:
       MULTI_WATCHER: http://scale-mon:7100
       MULTI_SITE: http://scale-site:8080
+      TAKEOVER_CTRL: http://scale-takeover:7300
+      TAKEOVER_VNC: http://${MINI_HOST:-localhost}:${TAKEOVER_PORT:-7500}/vnc.html?autoconnect=1&resize=scale&quality=3
       PORT: "7000"
     ports:
       - "${FLEET_BIND:-127.0.0.1}:${SCALE_DASH_PORT:-7400}:7000"
     depends_on:
       - scale-mon
+      - scale-takeover
     restart: unless-stopped

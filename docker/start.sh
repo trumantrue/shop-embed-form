@@ -34,4 +34,10 @@ x11vnc -display :99 -forever -shared -passwd "$VNC_PASSWORD" -rfbport 5900 \
 # noVNC web client on :6080 → open http://<host>:6080/vnc.html
 websockify --web=/usr/share/novnc 6080 localhost:5900 &
 
+# TAKEOVER=1 runs the on-demand takeover browser (re-pointable, driven by the
+# user over VNC) instead of the monitoring watcher.
+if [ -n "${TAKEOVER:-}" ]; then
+  exec node takeover.js
+fi
+
 exec node watcher.js

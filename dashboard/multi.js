@@ -9,6 +9,8 @@ const http = require('http');
 const PORT = parseInt(process.env.PORT || '7000', 10);
 const MW = (process.env.MULTI_WATCHER || 'http://localhost:7100').replace(/\/+$/, '');
 const SITE = (process.env.MULTI_SITE || 'http://localhost:8080').replace(/\/+$/, '');
+const TAKEOVER_CTRL = (process.env.TAKEOVER_CTRL || '').replace(/\/+$/, '');
+const TAKEOVER_VNC = process.env.TAKEOVER_VNC || '';
 
 async function fetchStatus() {
   try {
@@ -60,6 +62,17 @@ const PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <div class="lead" id="lead"></div>
 <div id="grid"></div>
 <script>
+let CFG={takeover:false,takeoverVnc:''};
+fetch('/api/config').then(r=>r.json()).then(c=>{CFG=c;}).catch(function(){});
+async function takeover(id,btn){
+  if(!CFG.takeover){alert('Takeover not configured');return;}
+  btn.disabled=true;const t=btn.textContent;btn.textContent='…';
+  try{
+    const r=await fetch('/api/takeover/'+id,{method:'POST'});
+    if(!r.ok){alert('Takeover failed');return;}
+    window.open(CFG.takeoverVnc,'_blank');
+  }finally{btn.disabled=false;btn.textContent=t;}
+}
 async function refresh(){
  let d; try{ d=await (await fetch('/api/status',{cache:'no-store'})).json(); }catch(e){ return; }
  if(!d||!d.instances){ document.getElementById('sum').textContent='multi-watcher unreachable'; return; }
@@ -84,6 +97,7 @@ async function refresh(){
    return '<div class="'+cls+'"><div class="h"><span>#'+x.id+' V'+x.variant+'</span><span class="m">'+(x.method||x.state||'')+'</span></div>'+
      '<div class="bar"><div class="fill" style="width:'+Math.round(p*100)+'%"></div></div>'+
      '<div class="ctl">'+
+       (CFG.takeover?'<button onclick="takeover('+x.id+',this)" title="VNC into this instance">VNC</button>':'')+
        '<button onclick="resetOne('+x.id+',this)">Reset</button>'+
        '<a href="/api/page/'+x.id+'" target="_blank">Open</a>'+
        '<a href="/api/submissions/'+x.id+'" target="_blank">Subs</a>'+
@@ -111,6 +125,20 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && (m = req.url.match(/^\/api\/reset\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}/reset`, method: 'POST' }, res, 'application/json');
   if (req.method === 'GET' && (m = req.url.match(/^\/api\/submissions\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}/submissions`, method: 'GET' }, res, 'application/json');
   if (req.method === 'GET' && (m = req.url.match(/^\/api\/page\/(\d+)$/))) return proxySite({ path: `/q/${m[1]}`, method: 'GET' }, res, 'text/html; charset=utf-8');
+  if (req.url === '/api/config') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ takeover: !!(TAKEOVER_CTRL && TAKEOVER_VNC), takeoverVnc: TAKEOVER_VNC }));
+  }
+  // Point the shared takeover browser at instance :id, then the client opens
+  // the noVNC URL. One slot: re-pointing supersedes the previous target.
+  if (req.method === 'POST' && (m = req.url.match(/^\/api\/takeover\/(\d+)$/))) {
+    if (!TAKEOVER_CTRL) { res.writeHead(503); return res.end('takeover not configured'); }
+    try {
+      const r = await fetch(`${TAKEOVER_CTRL}/goto?url=${encodeURIComponent(`${SITE}/q/${m[1]}`)}`, { method: 'POST', signal: AbortSignal.timeout(25000) });
+      const body = await r.text();
+      res.writeHead(r.status, { 'Content-Type': 'application/json' }); return res.end(body);
+    } catch (e) { res.writeHead(502, { 'Content-Type': 'text/plain' }); return res.end(String(e.message)); }
+  }
   if (req.url === '/healthz') { res.writeHead(200); return res.end('ok'); }
   res.writeHead(404); res.end('not found');
 }).listen(PORT, () => console.log(`[multi-dashboard] :${PORT} -> ${MW}`));
