@@ -1,0 +1,46 @@
+# Scale stack: 100 instances from ONE multi-queue site + ONE pooled headless
+# multi-watcher + a text/numeric dashboard. Reuses the images built by the
+# main fleet (site-monitor-*:local), overriding the command. Runs alongside
+# the headful fleet on its own port; memory is bounded by SCALE_POOL, not by
+# the instance count.
+#
+#   docker compose -f docker-compose.scale.yml up -d
+#
+# Dashboard: http://<MINI_HOST>:${SCALE_DASH_PORT:-7400}
+
+services:
+  scale-site:
+    image: site-monitor-testsite:local
+    command: ["node", "multi.js"]
+    environment:
+      COUNT: "${SCALE_COUNT:-100}"
+      QUEUE_SIZE: "${QUEUE_SIZE:-1000}"
+    restart: unless-stopped
+
+  scale-mon:
+    image: site-monitor-monitor:local
+    command: ["node", "multiwatcher.js"]
+    environment:
+      MULTI_BASE: http://scale-site:8080
+      COUNT: "${SCALE_COUNT:-100}"
+      POOL_SIZE: "${SCALE_POOL:-6}"
+      STATUS_PORT: "7100"
+      NTFY_SERVER: ${NTFY_SERVER:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      LIVE_VIEW_URL: http://${MINI_HOST:-localhost}:${SCALE_DASH_PORT:-7400}/
+    depends_on:
+      - scale-site
+    restart: unless-stopped
+
+  scale-dash:
+    image: site-monitor-dashboard:local
+    command: ["node", "multi.js"]
+    environment:
+      MULTI_WATCHER: http://scale-mon:7100
+      PORT: "7000"
+    ports:
+      - "${FLEET_BIND:-127.0.0.1}:${SCALE_DASH_PORT:-7400}:7000"
+    depends_on:
+      - scale-mon
+    restart: unless-stopped
