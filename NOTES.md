@@ -22,6 +22,19 @@ mini just runs compose).
   link, **Reset** button (re-arms a completed instance remotely — instances
   are one-shot, so this is how you restart them from holiday), submissions
   view.
+- **Auto-start after reboot (2026-08-16):** the mini auto-logs-in as `steve`, and
+  a LaunchAgent `com.sitemonitor.fleet` (RunAtLoad) runs `boot.sh` at login →
+  `colima start` (with retry) then `docker compose -f docker-compose.fleet.yml
+  up -d`. Once colima is up the 21 containers also self-restore via
+  `restart: unless-stopped`, and Tailscale-serve forwards restore via tailscaled.
+  Files: `boot.sh` (repo root) + `deploy/com.sitemonitor.fleet.plist`; on the mini
+  the plist lives at `~/Library/LaunchAgents/`, logs at `~/dev/site-monitor/boot.log`.
+  Install/reinstall: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.sitemonitor.fleet.plist`.
+  **Recovery path tested for real** (colima stop → agent kickstart → 21 containers +
+  dashboard back in ~30s); only the literal OS-reboot→RunAtLoad hop is unproven,
+  but that is how the mini's 11 other services already start. If it ever does NOT
+  come back: `launchctl kickstart -k gui/$(id -u)/com.sitemonitor.fleet`, or run
+  `boot.sh` by hand.
 - **DEPLOYED on the mini 2026-08-16** (`stephens-mac-mini.tail39a0a0.ts.net`).
   As-built specifics, which differ from the original plan:
   - Docker = **Colima** (no Docker/OrbStack/brew existed; OrbStack needs GUI
