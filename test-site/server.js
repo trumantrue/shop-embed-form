@@ -89,10 +89,10 @@ function pageShell(body) {
   button { margin-top: 1.25rem; padding: 0.6rem 1.5rem; font-size: 1rem;
            background: #35be86; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
 
-  /* Queue bar — verbatim from the handover §7. Track, border and mask share
-     #4d4d4d so the mask is seamless. Segment is 24 tall in a 24 channel with
-     2px vertical margins; its 28px margin-box is clipped by overflow:hidden,
-     so segments meet the border top and bottom with no vertical gap. */
+  /* Queue bar — handover §7 (rev. 2). Track, border and mask share #4d4d4d so
+     the mask is seamless. Segment is 24 tall in a 24 channel with 2px vertical
+     margins; its 28px margin-box is clipped by overflow:hidden, so segments
+     meet the border top and bottom with no vertical gap. */
   .qbar {
     position: relative;
     display: flex;
@@ -111,7 +111,10 @@ function pageShell(body) {
     height: 24px;
     width: 16px;
     background: #35be86;
-    flex: none;
+    /* NO flex rule. Default flex-shrink:1 is load-bearing: more segments are
+       created than fit at 16px, and flexbox shrinks them to fill the channel
+       exactly (~13.8px at a 896px track). Pinning them (flex:none) overflows
+       the channel and renders a visibly different bar — see §3. */
   }
   .qbar-mask {
     position: absolute;
@@ -151,7 +154,7 @@ function queuePage() {
     <div class="qbar-mask" style="width:${maskWidth}%"></div>
   </div>
 <script>
-  const PITCH = 20; // 16px segment + 2px margin each side
+  const DIVISOR = 18; // ~= the pitch that results once segments shrink (§3, §8)
   const bar = document.querySelector('.qbar');
   const mask = bar.querySelector('.qbar-mask');
 
@@ -159,7 +162,9 @@ function queuePage() {
     bar.querySelectorAll('.qbar-seg').forEach((el) => el.remove());
     const width = bar.offsetWidth;
     if (!width) return;
-    const count = Math.ceil(width / PITCH) + 1; // +1 overfills the right edge
+    // Deliberately more segments than fit at their nominal 16px; flex-shrink
+    // sizes them to fill the channel exactly. Do not "fix" this — see §3.
+    const count = Math.floor(width / DIVISOR) + 1;
     const frag = document.createDocumentFragment();
     for (let i = 0; i < count; i++) {
       const seg = document.createElement('div');
