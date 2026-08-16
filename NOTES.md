@@ -63,6 +63,45 @@ mini just runs compose).
   changed" push per instance as each bar completes.
 - Load estimate: 10 headful Chromiums + Xvfb ≈ 3–5 GB RAM on the mini.
 
+## 0b. Variants + generic detection + scale to 100 (2026-08-16)
+
+**Generic detection.** The watcher no longer keys off `.qbar`/`data-progress`.
+`monitor/lib/detect.js` (`detectProgress`, shared verbatim by the watcher,
+multi-watcher and blind test) finds the bar with NO per-page selector: ARIA
+(`role=progressbar` + `aria-valuenow`) first, then the structural reveal
+signature (a wide short track with a right-anchored ~full-height absolute
+mask; progress = 1 − maskW/trackW), then a `data-progress` fallback. It tags
+the bar with `data-mon-bar` so the pixel-diff mask stays generic too.
+
+**Variants.** `test-site/variants.js` — 5 layouts (main / header band / fixed
+footer / sidebar / nested), 3 via ARIA and 2 structural-only with different
+classes/colours/sizes. Selected by `VARIANT` env or `?variant=N`. The live
+10-fleet rotates all 5 (proven: aria+structural, 0 mismatches).
+
+**Blind test.** `node monitor/blindtest.js` — loads every variant with zero
+hints, runs the same detector, compares to `/status` truth. Exits non-zero on
+any fail (CI-gatable). Last run: 5/5, aria ≤0.5pp, structural 0.00pp.
+
+**Scale stack (100 instances).** `docker-compose.scale.yml` — three services
+reusing the fleet images, runs ALONGSIDE the headful fleet:
+- `test-site/multi.js` — ONE process, N queues at `/q/:id` (own state +
+  rotating variant). ~14 MB for 100.
+- `monitor/multiwatcher.js` — ONE headless Chromium, a pool of `POOL_SIZE`
+  pages round-robin over N targets. **Memory scales with POOL, not N**:
+  measured ~724 MB for 100 instances at pool 4. Same generic detection + a
+  masked pixel-diff + text-hash change detection; admissions are BATCHED into
+  periodic summary ntfy pushes (`ALERT_FLUSH_MS`), not one per instance.
+  `mem_limit` (SCALE_MEM, default 2g) so an overshoot OOM-kills only this
+  container, never the fleet.
+- `dashboard/multi.js` — text/numeric dashboard (summary + leaderboard +
+  numeric-bar grid), no thumbnails.
+- Run: `SCALE_COUNT=100 SCALE_POOL=4 docker compose -f docker-compose.scale.yml up -d`
+  Dashboard: `http://<MINI_HOST>:7400` (tailnet TCP-forwarded; `down` to stop).
+  restart:unless-stopped means it survives reboots like the fleet. NOT in
+  boot.sh (it's a test stack); `docker compose -f docker-compose.scale.yml down`
+  to remove. **Currently running at 100 / pool 4.**
+- Whole 100-stack ≈ 750 MB vs ~30 GB for 100 headful containers (~40× less).
+
 ## 1. MacBook-only smoke test (no Docker, no proxy) — verified
 
 Run natively, headful, direct connection:
