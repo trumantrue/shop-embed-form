@@ -110,6 +110,12 @@ const PAGE = `<!DOCTYPE html>
   a.btn.primary { background: #2d5f3f; color: #fff; }
   img.thumb { width: 100%; border-radius: 6px; margin-top: 0.55rem; border: 1px solid #3a3a3c; }
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .leader { background: #2a2a2c; border-radius: 10px; padding: 0.9rem 1.1rem; margin-bottom: 1rem; }
+  .leader .winner { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .leader .winner .who { color: #2ecc80; }
+  .leader ol { margin: 0; padding-left: 1.4rem; color: #ccc; font-size: 0.85rem; line-height: 1.6; }
+  .leader ol .who { font-weight: 600; }
+  .leader .pct { color: #999; }
   button.reset-all { font-size: 0.8rem; padding: 0.45rem 0.9rem; border-radius: 7px; border: 0;
     background: #7a2727; color: #fff; cursor: pointer; }
   button.reset-all:disabled { opacity: 0.5; cursor: default; }
@@ -120,6 +126,7 @@ const PAGE = `<!DOCTYPE html>
   <h1>Monitor fleet</h1>
   <button class="reset-all" onclick="resetAll(this)">Reset all</button>
 </div>
+<div class="leader" id="leader"></div>
 <div id="grid">loading…</div>
 <script>
 const SEGS = 33;
@@ -167,9 +174,32 @@ function card(i) {
     '<img class="thumb" src="/api/shot/' + i.label + '?t=' + Date.now() + '" onerror="this.style.display=\\'none\\'">' +
   '</div>';
 }
+function progressOf(i) {
+  const w = i.watcher, s = i.site;
+  if (w && w.progress !== null && w.progress !== undefined) return w.progress;
+  if (s && s.state === 'form') return 1;
+  if (s && typeof s.progress === 'number') return s.progress;
+  return 0;
+}
+function renderLeader(fleet) {
+  const ranked = fleet
+    .map((i) => ({ label: i.label, p: progressOf(i) }))
+    .sort((a, b) => b.p - a.p);
+  const el = document.getElementById('leader');
+  if (!ranked.length) { el.innerHTML = ''; return; }
+  const win = ranked[0];
+  const top5 = ranked.slice(0, 5).map((r) =>
+    '<li><span class="who">' + r.label + '</span> <span class="pct">at ' + Math.round(r.p * 100) + '%</span></li>'
+  ).join('');
+  el.innerHTML =
+    '<div class="winner">🏆 Currently winning: <span class="who">' + win.label +
+      '</span> at ' + Math.round(win.p * 100) + '%</div>' +
+    '<ol>' + top5 + '</ol>';
+}
 async function refresh() {
   try {
     const fleet = await (await fetch('/api/fleet', { cache: 'no-store' })).json();
+    renderLeader(fleet);
     document.getElementById('grid').innerHTML = fleet.map(card).join('');
   } catch (e) { /* retry next tick */ }
 }
