@@ -28,6 +28,7 @@ const { PNG } = require('pngjs');
 const pixelmatch = require('pixelmatch');
 const ntfy = require('./lib/ntfy');
 const { detectProgress } = require('./lib/detect');
+const { buildProxy, describeProxy } = require('./lib/proxy');
 
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -65,17 +66,12 @@ function loadConfig() {
 }
 
 function proxySettings(cfg) {
-  const { BRD_CUSTOMER, BRD_ZONE, BRD_PASSWORD } = process.env;
-  if (!BRD_CUSTOMER || !BRD_ZONE || !BRD_PASSWORD) return null;
+  // One sticky session for this watcher's lifetime, so its exit IP holds and
+  // "IP changed" isn't misread as "content changed". 8 hex chars = IPRoyal's
+  // required 8-char session id.
   const session = crypto.randomBytes(4).toString('hex');
-  let username = `brd-customer-${BRD_CUSTOMER}-zone-${BRD_ZONE}`;
-  if (cfg.country) username += `-country-${cfg.country}`;
-  username += `-session-${session}`;
-  return {
-    server: process.env.BRD_PROXY_HOST || 'http://brd.superproxy.io:33335',
-    username,
-    password: BRD_PASSWORD,
-  };
+  const p = buildProxy(process.env, cfg, session);
+  return p ? { server: p.server, username: p.username, password: p.password, provider: p.provider } : null;
 }
 
 function sha256(s) {
@@ -129,7 +125,14 @@ async function main() {
   startStatusServer();
 
   console.log(`[watcher] label=${cfg.label} url=${cfg.url} interval=${cfg.checkIntervalSeconds}s ` +
-    `proxy=${proxy ? `bright-data (country=${cfg.country || 'any'})` : 'DIRECT (no BRD_* env set)'} headless=${HEADLESS}`);
+    `country=${cfg.country || 'any'} proxy=${describeProxy(proxy)} headless=${HEADLESS}`);
+
+  // Dry run: show exactly what proxy would be used (credentials redacted) and
+  // exit, so the config can be verified before spending any bandwidth.
+  if (process.env.PROXY_DRYRUN === '1') {
+    console.log('[watcher] PROXY_DRYRUN=1 — not launching. Proxy config above.');
+    process.exit(0);
+  }
 
   const browser = await chromium.launch({
     headless: HEADLESS,
@@ -141,11 +144,14 @@ async function main() {
   const page = await context.newPage();
 
   if (proxy) {
-    // brdtest.com is Bright Data's own check endpoint; log the exit geo once
-    // so alerts can be sanity-checked against IP churn.
+    // Confirm the exit IP + country through the proxy (provider-agnostic), so
+    // alerts can be sanity-checked and the requested country verified. If this
+    // doesn't match cfg.country, the geo targeting isn't taking effect.
     try {
-      const geo = await context.request.get('https://geo.brdtest.com/mygeo.json', { timeout: 15000 });
-      console.log(`[watcher] exit geo: ${(await geo.text()).slice(0, 300)}`);
+      const geo = await context.request.get('https://ipinfo.io/json', { timeout: 15000 });
+      const j = await geo.json().catch(() => ({}));
+      console.log(`[watcher] exit IP=${j.ip || '?'} country=${j.country || '?'} city=${j.city || '?'} org=${j.org || '?'}` +
+        (cfg.country && j.country && j.country.toLowerCase() !== cfg.country.toLowerCase() ? `  ⚠ requested ${cfg.country}` : ''));
     } catch (err) {
       console.warn(`[watcher] exit-geo check failed: ${err.message}`);
     }
